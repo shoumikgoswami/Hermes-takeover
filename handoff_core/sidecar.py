@@ -241,10 +241,9 @@ class Sessions:
             if not PLUGIN_FILE.exists():       # `hermes plugins remove handoff` deleted us: do not linger as an orphan
                 log.info("plugin removed; removing the WebUI extension and exiting")
                 try:
-                    from . import webui
-                    webui.orphan_cleanup()
-                except Exception:  # noqa: BLE001
-                    pass
+                    sys.modules[__package__ + ".webui"].orphan_cleanup()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("could not remove the WebUI extension: %s", type(exc).__name__)
                 for s in list(self.items.values()):
                     s.close(CLOSE_SCREEN_OFF)
                 os._exit(0)
@@ -432,6 +431,7 @@ class Server(ThreadingHTTPServer):
 
 
 def serve(port: int = DEFAULT_PORT) -> Server:
+    from . import webui  # noqa: F401 - import now: after `plugins remove` the file is gone and the exit cleanup needs it
     app = App()
     srv = Server(("127.0.0.1", port), make_handler(app))
     srv.app = app
