@@ -376,12 +376,18 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     G.eval("document.querySelector('.plugin-card[data-plugin=\"takeover\"] [data-hdo-open]').click()")
     G.wait("window.__hermesTakeover.state().active", 20)
     check("its Open Screen button opens the live Screen page", G.eval("window.__hermesTakeover.state().active"))
-    # the dashboard tab copy (sandboxed iframe, no backend) hands off to the real page instead of rendering blank
-    G.eval("fetch('/api/settings',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({dashboard_plugins:{takeover:true}})})")
-    time.sleep(1); js(G, "window.__hermesTakeover.close()"); time.sleep(1)
-    G.eval("switchPluginPage(null, '/takeover', 'Screen')")
+    # the dashboard-tab copy: WebUI opens it in a sandboxed iframe that cannot even load its script while WebUI auth is on
+    # (SameSite=Lax session cookie, null origin). Enabling it adds WebUI's own open button; that must go to the live page.
+    G.eval("handlePluginEnableToggle('takeover', true).then(()=>1)", True)
+    check("dashboard tab enabled through WebUI's own toggle", "takeover" in str(G.eval(
+        "fetch('/api/settings',{credentials:'same-origin'}).then(r=>r.json()).then(j=>JSON.stringify(j.dashboard_plugins||{}))", True)))
+    js(G, "window.__hermesTakeover.close()"); time.sleep(1)
+    G.eval("switchPanel('settings')"); time.sleep(1.5); G.eval("switchSettingsSection('plugins')")
+    G.wait("!!document.querySelector('.plugin-card[data-plugin=\"takeover\"] a.plugin-open-btn')", 30)
+    G.eval("document.querySelector('.plugin-card[data-plugin=\"takeover\"] a.plugin-open-btn').click()")
     G.wait("window.__hermesTakeover.state().active", 20)
-    check("the sandboxed dashboard-tab copy hands off to the live Screen page", G.eval("window.__hermesTakeover.state().active"))
+    check("WebUI's own plugin open button lands on the live Screen page, not the sandboxed copy",
+          G.eval("window.__hermesTakeover.state().active && !document.querySelector('#pluginPageContainer iframe')"))
     G.call("Page.close")
 
     # ── hiding the page stops the stream; no session leak on the sidecar ──
