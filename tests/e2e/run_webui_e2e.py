@@ -339,6 +339,14 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("force hand-back: agent resumes", L.get().holder == "agent")
     D.screenshot(f"{SHOTS}/9-forced.png")
 
+
+    # ── hiding the page stops the stream; no session leak on the sidecar ──
+    js(A, "window.__hermesTakeover.close()")
+    time.sleep(8)
+    cfg = open(os.path.join(HOME, "config.yaml")).read() if os.path.exists(os.path.join(HOME, "config.yaml")) else ""
+    check("first run turned browser.headed on by itself", "headed: true" in cfg, cfg[:200])
+    check("leaving the Screen page stops streaming", not A.eval("window.__hermesTakeover.state().connected"))
+
     # ── one tap: the agent asks again, the user taps "Take over" in the banner on the chat page ──
     box2 = []; t2 = threading.Thread(target=run_tool, args=({"reason": "Approve the Hermes app on GitHub", "wait_seconds": 90}, box2)); t2.start()
     E = page(chrome)                                    # an ordinary WebUI page (chat), Screen not open
@@ -389,13 +397,6 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("WebUI's own plugin open button lands on the live Screen page, not the sandboxed copy",
           G.eval("window.__hermesTakeover.state().active && !document.querySelector('#pluginPageContainer iframe')"))
     G.call("Page.close")
-
-    # ── hiding the page stops the stream; no session leak on the sidecar ──
-    js(A, "window.__hermesTakeover.close()")
-    time.sleep(8)
-    cfg = open(os.path.join(HOME, "config.yaml")).read() if os.path.exists(os.path.join(HOME, "config.yaml")) else ""
-    check("first run turned browser.headed on by itself", "headed: true" in cfg, cfg[:200])
-    check("leaving the Screen page stops streaming", not A.eval("window.__hermesTakeover.state().connected"))
 finally:
     chrome.close()
     if term: term.terminate()
