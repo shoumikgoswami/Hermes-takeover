@@ -268,11 +268,11 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("hold-then-drag selects text on the remote page", len(sel) > 10, repr(sel))
 
     # pinch zoom changes the view, and taps stay accurate afterwards
-    cx, cy = centre(); z0 = V()["s"]
+    cx, cy = centre(); z0 = V()["s"]; A.eval("window.__hdoT=[]")
     touch("touchStart", [(cx - 40, cy), (cx + 40, cy)])
     for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
     touch("touchEnd", []); time.sleep(0.4)
-    z1 = V()["s"]
+    z1 = V()["s"]; print("      trace:", A.eval("window.__hdoT.join(' ')")[:600])
     check("pinch zooms the view in", z1 > z0 * 1.4, f"{z0} -> {z1}")
     R.eval("window.scrollTo(0,0)"); time.sleep(1)
     bx, by, bw, bh, ox, oy = rect("#b"); tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)

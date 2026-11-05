@@ -152,6 +152,7 @@ export class TouchView {
 
   // ── touch ────────────────────────────────────────────────────────────────
   _ts(e) {
+    if (window.__hdoT) window.__hdoT.push('ts' + e.touches.length + ':' + (this.g ? this.g.mode : '-') + ':' + (e.target && e.target.className));
     if (this._ui(e)) return;
     e.preventDefault(); e.stopPropagation();
     cancelAnimationFrame(this._raf); this._raf = 0;                 // a touch stops momentum
@@ -184,6 +185,7 @@ export class TouchView {
   }
 
   _tm(e) {
+    if (window.__hdoT) window.__hdoT.push('tm' + e.touches.length + ':' + (this.g ? this.g.mode : '-'));
     if (this._ui(e)) return;
     e.preventDefault(); e.stopPropagation();
     const g = this.g; if (!g) return;
