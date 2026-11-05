@@ -248,8 +248,10 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     c0 = int(kv()["c"]); touch("touchStart", [(tx_, ty_)]); time.sleep(0.05); touch("touchEnd", []); time.sleep(1)
     check("a tap clicks exactly where the finger is (remote button pressed once)", int(kv()["c"]) == c0 + 1, title())
 
+    A.eval("window.__tl=[]; ['touchstart','touchmove','touchend'].forEach(k=>window.addEventListener(k,e=>window.__tl.push(k[5]+e.touches.length+'/'+e.changedTouches.length),true))")
     # two-finger tap = right click
     x0_ = int(kv()["x"]); touch("touchStart", [(tx_ - 30, ty_ + 60), (tx_ + 30, ty_ + 60)]); time.sleep(0.06); touch("touchEnd", []); time.sleep(1)
+    print("      touch log:", A.eval("window.__tl.join(' ')"))
     check("two-finger tap sends a right click (contextmenu on the remote page)", int(kv()["x"]) == x0_ + 1, title())
 
     # hold then drag selects text
