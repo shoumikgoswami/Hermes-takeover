@@ -2,38 +2,44 @@
 
 **Take over your agent's browser, do the one step only you can do, hand it back.**
 
-When the agent hits a login, a 2FA code, a CAPTCHA or a payment page, it calls `request_handoff`. You get a
-**Screen** tab in the Hermes dashboard (works from a phone) showing the agent's Chrome live. Tap **Take over**,
+When the agent hits a login, a 2FA code, a CAPTCHA or a payment page, it calls `request_handoff`. You get a **Screen**
+view of the agent's Chrome (works from a phone) in **hermes-webui** and/or the **Hermes dashboard**. Tap **Take over**,
 complete the step in that same browser, tap **Hand back**. The agent's waiting tool call returns by itself and it
 continues, logged in.
 
-A native Hermes plugin: no sidecar, no extra port, no tunnel, no config. The dashboard serves everything.
+One native Hermes plugin. No tunnel, no reverse proxy, no extra port to open, no config to write.
 
 ## Install
 
 ```bash
 hermes plugins install <owner>/hermes-handoff --enable      # or any git URL
-hermes dashboard                                            # Screen tab appears; restart it if it was already running
 ```
 
-That is all. On first use Handoff sets itself up (below). Remove with `hermes plugins remove handoff`.
+Then just use Hermes. The first agent session wires everything up (below). Remove with `hermes plugins remove handoff`.
+
+| Surface | How it appears | Your one manual step |
+|---|---|---|
+| **hermes-webui** (the `:8787` app) | A **Screen** icon in the rail / phone nav; an amber banner on every page while the agent is asking | Settings → Extensions → Diagnostics → Loopback sidecars → **Handoff** → **Approve proxy**. That is WebUI's own security consent, and WebUI authentication must be on (Settings → set a password). The Screen page tells you this until you do it. |
+| **Hermes dashboard** (`hermes dashboard`) | A **Screen** tab; banner on every page | none (restart the dashboard once if it was already running) |
 
 ### What "first run" does (automatically, once)
 
 | Need | How it is handled |
 |---|---|
-| Screen packages (TigerVNC + Xfce) | Installed through **Hermes's own Bot Desktop installer** (the one the Desktop app's Install button uses). That installer escalates to root, so it works unattended only where root needs no password; otherwise Handoff shows you the exact command to run and a **Run setup** button. |
-| TigerVNC specifically | Many images ship a TightVNC `Xvnc`; it passes a "binary exists" check but cannot start Bot Desktop. Handoff detects it and tells you how to point `Xvnc` at TigerVNC. |
+| Screen packages (TigerVNC + Xfce) | Installed through **Hermes's own Bot Desktop installer** (the one the Desktop app's Install button uses). That installer escalates to root, so it works unattended only where root needs no password; otherwise Handoff shows the exact command and a **Run setup** button. |
+| TigerVNC specifically | Many images ship a TightVNC `Xvnc`; it passes a "binary exists" check but cannot start Bot Desktop. Handoff detects it and says how to fix it. |
 | Agent's Chrome visible | Sets `browser.headed: true` through the config API. |
-| Python packages | **None.** FastAPI/websockets come with the dashboard; noVNC 1.6.0 is bundled (no CDN). |
+| hermes-webui (if on this host) | Copies the Screen page into WebUI's extensions folder (loads on the next page render, no WebUI restart) and starts Handoff's small loopback service, detached. The next agent session restarts it if it is not running. |
+| Python packages | **None.** Everything is stdlib or already in Hermes; noVNC 1.6.0 is bundled (no CDN). |
 
-Triggered by the first Screen-tab visit, the first `request_handoff` call, or `hermes handoff setup`. It runs once
-automatically; after that only on request. Opt out: `hermes config set plugins.entries.handoff.settings.auto_install false`.
-Linux hosts only (Bot Desktop is Linux-only); the tool hides itself elsewhere.
+Triggers: first agent session, first Screen visit, first `request_handoff`, or `hermes handoff setup` / `hermes handoff webui`.
+It runs once automatically; afterwards only on request. Switches (`hermes config set plugins.entries.handoff.settings.<key> false`):
+`auto_install` (packages + headed browser) and `webui_integration` (never touch hermes-webui). Linux only (Bot Desktop is
+Linux-only); the tool hides itself elsewhere.
 
 ## Using it
 
-**Agent side.** The tool `request_handoff(reason, wait_seconds=900)` posts the request and waits until you hand back:
+**Agent side.** `request_handoff(reason, wait_seconds=900)` posts the request and waits until you hand back:
 
 | Result | Meaning |
 |---|---|
@@ -43,59 +49,86 @@ Linux hosts only (Bot Desktop is Linux-only); the tool hides itself elsewhere.
 While you hold control every screen/browser tool is refused (`HumanHasControl`), even screenshots, because you may be
 typing a credential. A bundled skill (`handoff:handoff`) teaches the agent when to ask and never to request secrets in chat.
 
-**Your side.** Dashboard → **Screen**. While the agent is asking, an amber banner shows on *every* dashboard page.
+**Your side.** Open **Screen**. The status line says who is driving; the video is view-only until you **Take over**
+(enforced server-side, not just in the UI).
 
-- Status line says who is driving. The video is view-only until you **Take over** (enforced server-side, not just in the UI).
-- Phone: tap = click · two-finger tap = right click · hold then drag = drag · two-finger drag = scroll · **Zoom** toggles fit / 100% with panning.
+- Phone: tap = click · two-finger tap = right click · hold then drag = drag · two-finger drag = scroll · **Zoom** = fit / 100% with panning.
 - **⌨ Keyboard** opens the phone keyboard. **Type text** sends a pasted string as keystrokes (best for passwords with symbols).
   Esc / Tab / Enter / Ctrl+L / Ctrl+A / Ctrl+V are always there. **Paste from phone** needs HTTPS or localhost.
 - Closed the tab mid-takeover? The agent stays locked out until you reopen Screen and press **Force hand-back**
-  (or run `hermes handoff release`, or `/handoff release`). A second device's Take over evicts the first.
+  (or `hermes handoff release`, or `/handoff release`). A second device's Take over evicts the first.
 
-**CLI.** `hermes handoff status | setup | screen | release` and `/handoff` in any chat.
+**CLI.** `hermes handoff status | setup | screen | release | webui [--remove]` and `/handoff` in any chat.
+
+## How it works
+
+```
+agent process                         hermes-webui (whatever host/port you already use, incl. over Tailscale)
+ request_handoff ─┐                    browser ── /api/extensions/handoff/sidecar/* ──► WebUI proxy (your login + CSRF + consent)
+ hermes handoff   ├─ handoff_core ─┐                                                     │ adds X-Hermes-Sidecar-Token
+ dashboard routes ┘  (lease, setup,│                                                     ▼
+                      requests)    ├─ Bot Desktop lease file  ◄── loopback sidecar 127.0.0.1:17901 (stdlib, detached)
+hermes dashboard ── /api/plugins/handoff/* ──────────────────────┘     RfbClientFilter + lease gate ──► Xvnc ── agent's Chrome
+```
+
+hermes-webui cannot add backend routes and its sidecar proxy cannot carry WebSockets, so on WebUI the live screen is
+**noVNC over a long-poll HTTP channel** (a WebSocket-shaped object that noVNC drives): `rfb/open`, `rfb/send` (client→Xvnc),
+`rfb/recv` (Xvnc→client, 4 s long-poll, ≤ 400 KiB per response, under WebUI's 512 KiB / 10 s proxy limits). Because every
+byte rides WebUI's authenticated proxy, no ticket, extra port or CSP change is needed. The dashboard uses a real WebSocket
+(single-use 30 s ticket + the dashboard's Host/Origin check, because HTTP middleware does not cover WebSockets).
 
 ## Security model
 
-- HTTP routes sit behind the dashboard's own authentication. The WebSocket stream is **not** covered by HTTP middleware,
-  so it is admitted only with a **single-use 30-second ticket** minted through an authenticated route, plus the dashboard's
-  own Host / Origin / peer check. Tickets ride in the URL (noVNC cannot send headers) and are spent on first use.
-- The server-side RFB filter drops key / pointer / clipboard / resize messages unless the lease says *this* viewer holds
-  it. noVNC's view-only flag is only UX.
-- The lease is a tool-level fence, not an OS boundary: anything you type is visible to the agent's browser. Do not enter a
+- WebUI: the sidecar answers only requests carrying the per-extension token that WebUI mints after **your** consent, re-read on
+  every request (401 wrong, 503 missing). It binds 127.0.0.1 only. The token protects against other OS users, not against code
+  running as you (including the agent).
+- Server-side the RFB filter drops key / pointer / clipboard / resize messages unless the lease says *this* viewer holds it;
+  noVNC's view-only flag is only UX. Verified by sending forged key events from a watching page.
+- The lease is a tool-level fence, not an OS boundary: anything you type is visible to the agent's browser. Don't enter a
   secret you would not trust the agent with.
-- Logs never contain tickets, full viewer ids, keystrokes or frames.
-- The plugin runs with the dashboard's permissions, like any Hermes plugin. Its only privileged action is the package
-  install, delegated to Hermes's Bot Desktop installer; it has no code path of its own that elevates privileges.
+- Logs never contain tickets, stream session ids, full viewer ids, keystrokes or frames (the sidecar logs no URLs).
+- The plugin runs with your user's permissions, like any Hermes plugin. Its only privileged action is the package install,
+  delegated to Hermes's Bot Desktop installer; it has no code path of its own that escalates privileges. Its only writes
+  outside its own data dir: `browser.headed` in config, and (WebUI) the extension folder + install manifest in WebUI's state dir.
+- A WebUI service serves **one Hermes profile** (the lease lives in the profile's home). The first profile to start it wins;
+  `hermes handoff webui` from another profile takes it over; `hermes handoff status` says when it is serving a different one.
+  Port clash? `HANDOFF_PORT=<n> hermes handoff webui` rewrites the extension to match.
 
 ## Requirements and limits
 
-- Hermes with Bot Desktop (`tools.bot_desktop`); the plugin verifies the symbols it uses on first use and says so if a Hermes
-  update changed them (`hermes plugins update handoff`). `hermes plugins validate` lists these private imports; Bot Desktop has no public plugin API.
-- The dashboard must keep `plugins.isolation: process` (the default): the live stream needs the in-process route.
-- One screen per Hermes profile (the lease lives in the profile's home). The dashboard's profile scoping is respected.
-- The **hermes-webui** project (a separate app) does not load Hermes dashboard plugins; use `hermes dashboard`.
-- The agent's browser must be headed (`browser.headed`) and started *after* setup; an already-running headless Chrome shows an empty desktop.
+- Hermes with Bot Desktop (`tools.bot_desktop`). The plugin verifies the symbols it uses and says so if a Hermes update changed
+  them (`hermes plugins update handoff`). `hermes plugins validate` lists these private imports; Bot Desktop has no public plugin API.
+- Dashboard: keep `plugins.isolation: process` (default); the live stream needs the in-process route.
+- The agent's browser must be headed and started *after* setup; an already-running headless Chrome shows an empty desktop.
+- hermes-webui: authentication must be on (WebUI's rule for token-protected extension backends). Extensions run with full WebUI
+  session authority; this one is small, has no third-party scripts, and noVNC is vendored.
+- The long-poll channel adds about one HTTP round trip of latency per input; fine for forms, not for games.
 
 ## Layout
 
 ```
-plugin.yaml  __init__.py        tool, CLI, slash command, bundled skill
-handoff_core/                   compat (hermes-agent seam), setup (first run), control, bridge (RFB<->WS), tickets, tool, cli
-dashboard/                      manifest.json, plugin_api.py (routes + stream), dist/index.js + style.css, dist/novnc/ (vendored 1.6.0)
+plugin.yaml  __init__.py  sidecar_run.py     tool, CLI, slash command, session hook, bundled skill; detached sidecar entry
+handoff_core/   compat (hermes-agent seam) · setup (first run) · control (lease ops) · state · tickets · bridge (dashboard WS)
+                sidecar (hermes-webui backend + long-poll stream) · webui (install extension, keep service up) · tool · cli
+dashboard/      manifest.json · plugin_api.py (routes + WebSocket) · dist/ (index.js, style.css, novnc/ 1.6.0 vendored)
+webui/          manifest.json · assets/handoff.js + handoff.css   (noVNC is copied in from dashboard/dist at install)
 skills/handoff/SKILL.md
-tests/test_core.py              36 tests: real lease + RFB filter + uvicorn + websockets, fake screen
-tests/e2e/                      real dashboard + real Xvnc/Xfce + real Chromium (25 checks)
+tests/          test_core.py (37) · test_sidecar.py (25) · e2e/run_e2e.py (dashboard, 25 checks) · e2e/run_webui_e2e.py (WebUI, 30 checks)
 ```
 
 ## Tests
 
 ```bash
 V=<hermes venv python>
-$V -m unittest discover -s tests -v                      # core, routes, bridge gating, tool semantics, first-run policy
-# end to end (scratch HERMES_HOME so nothing real is touched):
+$V tests/run_all.py          # each file in its own process; real lease + RFB filter + real servers, fake screen
+# end to end, scratch homes (touches nothing real). WebUI:
+S=$(mktemp -d); W=$(mktemp -d)
 HERMES_HOME=$S hermes plugins install file://$PWD --enable --yes-deps
-HERMES_HOME=$S HERMES_DASHBOARD_SESSION_TOKEN=e2e-session-token hermes dashboard --port 9199 --no-open --skip-build &
-E2E_HOME=$S $V tests/e2e/run_e2e.py
+HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W HERMES_WEBUI_PASSWORD=e2e-pass-123 HERMES_WEBUI_HOST=127.0.0.1 HERMES_WEBUI_PORT=8798 $V ~/hermes-webui/server.py &
+HANDOFF_PORT=17951 HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W hermes handoff webui
+HANDOFF_PORT=17951 E2E_HOME=$S E2E_STATE=$W $V tests/e2e/run_webui_e2e.py
+# dashboard: HERMES_HOME=$S HERMES_DASHBOARD_SESSION_TOKEN=e2e-session-token hermes dashboard --port 9199 --no-open --skip-build &
+#            then  E2E_HOME=$S $V tests/e2e/run_e2e.py
 ```
 
 Licenses: MIT; bundles noVNC 1.6.0 (MPL-2.0) and pako (MIT) unmodified under `dashboard/dist/novnc/`.
