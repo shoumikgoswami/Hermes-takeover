@@ -30,6 +30,9 @@ def check(name, cond, detail=""):
 sys.path.insert(0, AGENT_DIR); os.environ["HERMES_HOME"] = HOME
 from tools.bot_desktop import lease as L, runtime as RT
 L.release()
+for stale in ("setup.json", "request.json"):                       # first-run state is "attempt once": start each run fresh
+    try: os.unlink(os.path.join(HOME, "handoff", stale))
+    except OSError: pass
 if os.path.exists(OUT): os.remove(OUT)
 try: RT.stop()
 except Exception: pass
