@@ -14,4 +14,4 @@ config_schema:
   auto_install:
     type: bool
     default: true
-    description: "On first use, install the screen packages (needs passwordless sudo) and enable browser.headed automatically."
+    description: "On first use, install the screen packages (needs root access without a password prompt) and enable browser.headed automatically."
