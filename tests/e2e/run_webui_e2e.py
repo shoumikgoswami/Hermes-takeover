@@ -266,7 +266,10 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     z0 = V()["s"]
     A.eval("window.__err=[]; addEventListener('error', e=>window.__err.push(e.message+' @'+e.lineno))")
     touch("touchStart", [(cx - 40, cy), (cx + 40, cy)])
-    for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
+    print("      after start g:", A.eval("JSON.stringify(window.__hermesHandoff.tv().g)"))
+    for i in range(1, 11):
+        touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
+        if i in (1, 10): print("      move", i, A.eval("JSON.stringify(window.__hermesHandoff.tv().g)"), V()["s"])
     touch("touchEnd", []); time.sleep(0.4)
     z1 = V()["s"]
     print("      page errors:", A.eval("window.__err"), "g=", A.eval("JSON.stringify(window.__hermesHandoff.tv().g)"))
