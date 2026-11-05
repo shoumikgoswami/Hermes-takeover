@@ -1,0 +1,60 @@
+/* Handoff for hermes-webui: page styles. Core WebUI tokens only (every skin / light / dark). All classes hdo-. */
+#mainHandoff { display: none; }
+main.main.showing-x-handoff > #mainChat { display: none !important; }
+main.main.showing-x-handoff > #mainHandoff { display: flex; }
+.layout:has(main.main.showing-x-handoff) > #btnWorkspacePanelEdgeToggle { display: none !important; }
+.hdo-page [hidden], .hdo-sidepanel[hidden] { display: none !important; }
+
+.hdo-page { flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+.hdo-wrap { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; padding: 10px; box-sizing: border-box; }
+.hdo-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.hdo-state { display: flex; align-items: center; gap: 8px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.hdo-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.hdo-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+.hdo-dot[data-s="agent"] { background: var(--info, var(--accent)); }
+.hdo-dot[data-s="me"] { background: var(--success, #3fb950); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success, #3fb950) 30%, transparent); }
+.hdo-dot[data-s="other"], .hdo-dot[data-s="wait"] { background: var(--warning, #d29922); }
+.hdo-dot[data-s="err"] { background: var(--error, #f85149); }
+
+.hdo-btn, .hdo-key { font: inherit; color: var(--text); background: var(--hover-bg, transparent); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; min-height: 40px; cursor: pointer; touch-action: manipulation; }
+.hdo-btn:hover, .hdo-key:hover { border-color: var(--accent); }
+.hdo-btn:disabled, .hdo-key:disabled { opacity: .5; cursor: default; }
+.hdo-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.hdo-key { padding: 6px 10px; min-height: 36px; font-size: 13px; }
+.hdo-key[aria-pressed="true"] { border-color: var(--accent); }
+.hdo-link { font: inherit; background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; }
+
+.hdo-banner { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.hdo-banner.hdo-warn { border-color: var(--warning, #d29922); }
+.hdo-banner.hdo-err { border-color: var(--error, #f85149); }
+.hdo-banner.hdo-info { color: var(--text2, var(--text)); }
+
+.hdo-stage { position: relative; flex: 1 1 auto; min-height: 220px; background: #000; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.hdo-page.hdo-driving .hdo-stage { border-color: var(--success, #3fb950); border-width: 2px; }
+.hdo-screen { position: absolute; inset: 0; }
+.hdo-screen > div { background: #000 !important; }
+.hdo-screen canvas { touch-action: none; }
+.hdo-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa; font-size: 14px; pointer-events: none; text-align: center; padding: 12px; }
+
+.hdo-tools { display: flex; flex-direction: column; gap: 6px; }
+.hdo-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.hdo-type summary { cursor: pointer; padding: 4px 0; font-size: 13px; color: var(--text2, var(--text)); }
+.hdo-type textarea { width: 100%; box-sizing: border-box; font: 16px var(--font-mono, monospace); /* 16px: no iOS zoom-on-focus */ color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin: 4px 0; resize: vertical; }
+.hdo-chk { font-size: 13px; display: inline-flex; gap: 6px; align-items: center; margin-right: auto; }
+.hdo-hint { font-size: 12px; color: var(--muted); }
+/* offscreen but focusable (display:none would stop iOS opening the keyboard) */
+.hdo-kbd-input { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; }
+
+.hdo-rail.hdo-held, .hdo-nav.hdo-held { position: relative; }
+.hdo-rail.hdo-held::after, .hdo-nav.hdo-held::after { content: ""; position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--success, #3fb950); }
+.hdo-side { padding: 14px; font-size: 13px; line-height: 1.45; }
+.hdo-side-title { font-weight: 600; margin-bottom: 6px; }
+.hdo-side-body { color: var(--text2, var(--text)); }
+@media (max-width: 640px) { .hdo-wrap { padding: 6px; } .hdo-stage { min-height: 260px; } }
+
+.hdo-ask { border: 1px solid var(--warning, #d29922); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.hdo-log { margin: 0; padding: 8px 10px; font: 12px/1.4 var(--font-mono, monospace); border: 1px solid var(--border); border-radius: 8px; max-height: 14em; overflow: auto; white-space: pre-wrap; }
+.hdo-global { position: fixed; top: 0; left: 0; right: 0; z-index: 9000; padding: 8px 14px; font-size: 13px; text-align: center; background: var(--warning, #d29922); color: #000; }
+.hdo-global[hidden] { display: none; }
+.hdo-global .hdo-link { color: inherit; font-weight: 700; }
+.hdo-global-me { background: var(--success, #3fb950); }

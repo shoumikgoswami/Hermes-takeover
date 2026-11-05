@@ -1,0 +1,48 @@
+{
+  "extensions": [
+    {
+      "id": "handoff",
+      "name": "Handoff",
+      "description": "See and take over the agent's screen: logins, 2FA, CAPTCHAs, payments. Then hand back.",
+      "scripts": [
+        "assets/handoff.js"
+      ],
+      "stylesheets": [
+        "assets/handoff.css"
+      ],
+      "sidecar": {
+        "type": "loopback",
+        "origin": "http://127.0.0.1:17901",
+        "health_path": "/health",
+        "proxy_auth": "token-v1"
+      },
+      "permissions": {
+        "storage": {
+          "owned": true
+        },
+        "network_external": false,
+        "webui_api": {
+          "read": [
+            "/api/extensions/handoff/sidecar/api/status",
+            "/api/extensions/handoff/sidecar/api/pulse"
+          ],
+          "write": [
+            "/api/extensions/handoff/sidecar/api/status",
+            "/api/extensions/handoff/sidecar/api/pulse",
+            "/api/extensions/handoff/sidecar/api/setup",
+            "/api/extensions/handoff/sidecar/api/start",
+            "/api/extensions/handoff/sidecar/api/viewer",
+            "/api/extensions/handoff/sidecar/api/take-over",
+            "/api/extensions/handoff/sidecar/api/hand-back",
+            "/api/extensions/handoff/sidecar/api/force-hand-back",
+            "/api/extensions/handoff/sidecar/api/dismiss",
+            "/api/extensions/handoff/sidecar/api/rfb/open",
+            "/api/extensions/handoff/sidecar/api/rfb/send",
+            "/api/extensions/handoff/sidecar/api/rfb/recv",
+            "/api/extensions/handoff/sidecar/api/rfb/close"
+          ]
+        }
+      }
+    }
+  ]
+}

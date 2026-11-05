@@ -48,8 +48,24 @@ def _slash(raw: str) -> str:
     return "\n".join(lines)
 
 
+def _on_session_start(**kwargs) -> None:
+    """First agent session after install: wire the plugin into hermes-webui if it is on this host (idempotent, quiet)."""
+    import threading
+
+    def work() -> None:
+        try:
+            core = _load_core()
+            if core.webui.state_dir() is None:
+                return
+            core.webui.integrate(core.compat.current_home())
+        except Exception:  # noqa: BLE001 - never let a helper break a chat session
+            pass
+    threading.Thread(target=work, name="handoff-webui", daemon=True).start()
+
+
 def register(ctx) -> None:
     core = _load_core()
+    ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_tool(name=core.tool.NAME, toolset="handoff", schema=core.tool.SCHEMA, handler=core.tool.handle,
                       check_fn=core.tool.available, emoji="\U0001F590", description=core.tool.SCHEMA["description"][:200])
     ctx.register_cli_command(name="handoff", help="Take over the agent's screen: status, setup, release",

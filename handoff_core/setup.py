@@ -185,6 +185,16 @@ def _run(bd, s: Dict[str, Any], line: Callable[[str], None]) -> None:
             set_config_value("browser.headed", "true")
         except (SystemExit, Exception) as exc:  # noqa: BLE001 - managed installs refuse config writes
             line(f"Could not set browser.headed automatically ({type(exc).__name__}). Run: hermes config set browser.headed true")
+    try:
+        from . import webui
+        if webui.state_dir() is not None:
+            line("hermes-webui detected: installing the Screen page and starting its service…")
+            res = webui.integrate(compat.current_home(), force=True)
+            ok = (res.get("sidecar") or {}).get("running")
+            line("hermes-webui: Screen page installed." if ok else "hermes-webui: installed, but the service did not start: "
+                 + str((res.get("sidecar") or {}).get("error")))
+    except Exception as exc:  # noqa: BLE001 - the dashboard half works without it
+        line(f"hermes-webui integration skipped ({type(exc).__name__}).")
     s.update(state="done", error=None, manual_command=None)
     line("Setup complete.")
 

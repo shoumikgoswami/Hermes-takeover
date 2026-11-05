@@ -427,14 +427,15 @@ class TestTool(Base):
 
     def test_schema_and_registration(self):
         class Ctx:
-            def __init__(s): s.tools, s.cli, s.cmds, s.skills = [], [], [], []
+            def __init__(s): s.tools, s.cli, s.cmds, s.skills, s.hooks = [], [], [], [], []
+            def register_hook(s, name, fn): s.hooks.append(name)
             def register_tool(s, **kw): s.tools.append(kw["name"])
             def register_cli_command(s, **kw): s.cli.append(kw["name"])
             def register_command(s, name, handler, **kw): s.cmds.append(name)
             def register_skill(s, name, path): s.skills.append((name, Path(path).exists()))
         c = Ctx()
         plugin_init.register(c)
-        self.assertEqual((c.tools, c.cli, c.cmds, c.skills), (["request_handoff"], ["handoff"], ["handoff"], [("handoff", True)]))
+        self.assertEqual((c.tools, c.cli, c.cmds, c.skills, c.hooks), (["request_handoff"], ["handoff"], ["handoff"], [("handoff", True)], ["on_session_start"]))
         self.assertEqual(core.tool.SCHEMA["parameters"]["required"], ["reason"])
 
 

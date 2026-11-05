@@ -70,6 +70,13 @@ def _handle(args: Dict[str, Any]) -> str:
         ready = setup.ensure_ready(home)
     except RuntimeError as exc:
         return _out("error", f"The screen is not available: {exc}")
+    try:                                   # keep the hermes-webui half current (no-op when WebUI is not on this host)
+        from . import webui
+        if webui.state_dir() is not None and not webui.health(0.5):
+            import threading
+            threading.Thread(target=webui.integrate, args=(home,), daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
     if not control.screen(home)["running"]:
         try:
             if not control.start_screen(home)["running"]:

@@ -122,7 +122,8 @@ def pulse(home, viewer_id: Optional[str]) -> Dict[str, Any]:
 
 
 def status(home, viewer_id: Optional[str]) -> Dict[str, Any]:
+    from . import webui
     r = setup.readiness(home)
-    return {"ok": True, "version": __version__, "hermes_home": str(home), "readiness": r,
+    return {"ok": True, "version": __version__, "hermes_home": str(home), "readiness": r, "webui": webui.status(home),
             "setup": setup.setup_state(home), "screen": screen(home) if r["supported"] else {"running": False},
             "request": state.request_view(home), "lease": lease_view(home, viewer_id)}

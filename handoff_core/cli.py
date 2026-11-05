@@ -13,6 +13,8 @@ def setup_parser(sub) -> None:
     p.add_argument("--json", action="store_true")
     s.add_parser("setup", help="Install what Handoff needs (TigerVNC/Xfce, headed browser); safe to re-run")
     s.add_parser("screen", help="Start the agent's screen now")
+    w = s.add_parser("webui", help="hermes-webui: install/refresh the Screen page and its service (or --remove)")
+    w.add_argument("--remove", action="store_true", help="uninstall the Screen page from hermes-webui and stop the service")
     s.add_parser("release", help="Force control back to the agent (e.g. after closing a tab mid-takeover)")
     sub.set_defaults(func=run)
 
@@ -29,6 +31,22 @@ def run(args) -> int:
             setup.ensure_ready(home)
             print(json.dumps(control.start_screen(home)))
             return 0
+        if cmd == "webui":
+            from . import webui
+            if getattr(args, "remove", False):
+                from .webui import stop_sidecar, uninstall_extension
+                stop_sidecar(home)
+                print("removed" if uninstall_extension() else "hermes-webui not found")
+                return 0
+            res = webui.integrate(home, force=True)
+            if not res.get("detected"):
+                print("hermes-webui not found (looked at $HERMES_WEBUI_STATE_DIR and ~/.hermes/webui).")
+                return 1
+            sc = res.get("sidecar") or {}
+            print(f"Screen page installed in {res['state_dir']}; service {'running' if sc.get('running') else 'NOT running: ' + str(sc.get('error'))}.")
+            print("One-time step in WebUI: Settings -> Extensions -> Diagnostics -> Loopback sidecars -> Handoff -> Approve proxy.")
+            print("(WebUI authentication must be on for that; reload the page after approving.)")
+            return 0 if sc.get("running") else 1
         if cmd == "release":
             print(json.dumps(control.force_hand_back(home)["holder"]))
             return 0
@@ -43,6 +61,8 @@ def run(args) -> int:
         print(f"  headed:   {r['headed']}   screen: {'running' if sc.get('running') else 'off'}")
         print(f"  control:  {ls['holder']}" + (f" ({ls['reason']})" if ls.get("reason") else ""))
         print(f"  request:  {rq['reason'] + ' [' + rq['status'] + ']' if rq else '-'}")
+        w = st["webui"]
+        print("  webui:    " + (f"extension {w['extension'] or 'not installed'}, service {'up' if w['sidecar'] else 'down'}" if w["detected"] else "not detected"))
         if not r["ready"]:
             print("  fix:      hermes handoff setup" + (f"   (or: {r['install_command']})" if r.get("install_command") else ""))
         return 0

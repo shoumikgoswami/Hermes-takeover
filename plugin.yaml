@@ -1,13 +1,14 @@
 name: handoff
 version: 0.1.0
 manifest_version: 2
-description: "Take over the agent's browser from the dashboard (or your phone): do a login, 2FA, CAPTCHA or payment yourself, then hand control back. Adds the request_handoff tool, a Screen tab, and `hermes handoff`."
+description: "Take over the agent's browser from the Hermes dashboard or hermes-webui (or your phone): do a login, 2FA, CAPTCHA or payment yourself, then hand control back. Adds the request_handoff tool, a Screen tab/page, and `hermes handoff`."
 author: Handoff contributors
 license: MIT
 tags: [browser, dashboard, computer-use, human-in-the-loop]
 provides_tools:
   - request_handoff
-provides_hooks: []
+provides_hooks:
+  - on_session_start
 # No extra Python packages: FastAPI/websockets ship with the dashboard and noVNC is bundled.
 # System packages (TigerVNC + Xfce) are installed on first run through Hermes's own Bot Desktop installer.
 config_schema:

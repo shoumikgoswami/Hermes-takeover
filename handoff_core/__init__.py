@@ -11,7 +11,7 @@ import importlib
 __version__ = "0.1.0"
 PLUGIN_ID = "handoff"
 
-_SUBMODULES = ("compat", "state", "setup", "tickets", "control", "bridge", "tool", "cli")
+_SUBMODULES = ("compat", "state", "setup", "tickets", "control", "bridge", "sidecar", "webui", "tool", "cli")
 
 
 def __getattr__(name):          # lazy: the CLI never needs the bridge, the bridge never needs argparse
