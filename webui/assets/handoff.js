@@ -156,12 +156,15 @@
       '<button type="button" class="hdo-key" data-c="l">Ctrl+L</button><button type="button" class="hdo-key" data-c="a">Ctrl+A</button>' +
       '<button type="button" class="hdo-key" data-c="v">Ctrl+V</button>' +
       '<button type="button" class="hdo-key" data-f="paste">Paste from phone</button>' +
-      '<button type="button" class="hdo-key" data-f="zoom" aria-pressed="false">Zoom: fit</button></div>' +
+      '<button type="button" class="hdo-key" data-z="out" aria-label="Zoom out">−</button>' +
+      '<span class="hdo-zoom" data-f="zoomLabel">100%</span>' +
+      '<button type="button" class="hdo-key" data-z="in" aria-label="Zoom in">+</button>' +
+      '<button type="button" class="hdo-key" data-z="fit">Fit</button><button type="button" class="hdo-key" data-z="reset">Reset</button></div>' +
       '<details class="hdo-type"><summary>Type text (passwords, codes)</summary>' +
       '<textarea data-f="typed" rows="2" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste or type here, then Send. Sent as keystrokes; never stored."></textarea>' +
       '<div class="hdo-row"><label class="hdo-chk"><input type="checkbox" data-f="typedEnter"> press Enter after</label>' +
       '<button type="button" class="hdo-btn" data-f="typedSend">Send</button></div></details>' +
-      '<div class="hdo-hint">Tap = click · two-finger tap = right click · hold, then drag = drag · two-finger drag = scroll</div></div>' +
+      '<div class="hdo-hint">Drag = scroll · tap = click · hold, then drag = select/drag · pinch = zoom · two-finger tap = right click</div></div>' +
       '<input class="hdo-kbd-input" data-f="kbdInput" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Keyboard input for the remote screen" tabindex="-1">' +
       '</div>';
   }
@@ -414,14 +417,13 @@
       else empty = S.connecting ? 'Connecting to the screen…' : 'Waiting for the stream…';
     }
     setText(F.empty, empty); setHidden(F.empty, !empty);
-    F.zoom.setAttribute('aria-pressed', S.zoom ? 'true' : 'false');
-    setText(F.zoom, S.zoom ? 'Zoom: 100% (drag to pan)' : 'Zoom: fit');
   }
 
   // ── stream ────────────────────────────────────────────────────────────────
   async function loadRFB() {
     if (S.RFB) return S.RFB;
     S.RFB = (await import(ASSETS + 'novnc/core/rfb.js')).default;
+    S.TouchView = (await import(ASSETS + 'touch.js')).TouchView;
     return S.RFB;
   }
   function maybeConnect() {
@@ -446,9 +448,20 @@
       const chan = new HttpChannel(o.sid);
       const rfb = new RFB(F.screen, chan, {});
       rfb.viewOnly = true; rfb.focusOnClick = true; rfb.resizeSession = false; rfb.showDotCursor = false; rfb.background = '#000';
-      S.rfb = rfb; S.chan = chan; applyZoom(rfb);
+      rfb.scaleViewport = false; rfb.clipViewport = false; rfb.dragViewport = false;   // the touch layer owns zoom / pan / input
+      S.rfb = rfb; S.chan = chan;
+      const tv = S.tv = new S.TouchView({
+        stage: $('.hdo-stage', page), screen: F.screen,
+        sendRaw: (bytes) => { if (S.chan === chan) chan.send(bytes); },
+        canWrite: () => !!(S.rfb === rfb && S.inputOn),
+        focus: () => { try { rfb.focus(); } catch (_) { /* gone */ } },
+        onChange: (st) => { if (F.zoomLabel) F.zoomLabel.textContent = Math.round(st.s * 100) + '%'; },
+      });
+      const syncFb = () => { const c = F.screen.querySelector('canvas'); if (c && c.width) tv.setFb(c.width, c.height); };
+      rfb.addEventListener('desktopsize', syncFb);
       rfb.addEventListener('connect', () => {
         if (gen !== S.gen) return;
+        syncFb();
         S.connected = true; S.connecting = false; S.retry = 0; S.retried = false; S.note = '';
         applyInput(); render();
       });
@@ -459,13 +472,10 @@
     }
     render();
   }
-  function applyZoom(rfb) {
-    rfb = rfb || S.rfb; if (!rfb) return;
-    rfb.scaleViewport = !S.zoom; rfb.clipViewport = S.zoom; rfb.dragViewport = S.zoom;
-  }
   function disconnect() {
     S.gen++; clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
     const rfb = S.rfb;
+    if (S.tv) { S.tv.destroy(); S.tv = null; }
     S.rfb = null; S.chan = null; S.connected = false; S.connecting = false; S.inputOn = false;
     if (rfb) { try { rfb.disconnect(); } catch (_) { /* already closed */ } }
     if (F.screen) F.screen.textContent = '';
@@ -575,7 +585,10 @@
       if (a.dataset.act === 'force') forceHandBack();
       if (a.dataset.act === 'reconnect') { disconnect(); S.retry = 0; refresh().then(() => { render(); maybeConnect(); }); }
     });
-    F.zoom.addEventListener('click', () => { S.zoom = !S.zoom; applyZoom(); render(); });
+    $$('[data-z]', page).forEach((b) => b.addEventListener('click', () => {
+      const tv = S.tv; if (!tv) return;
+      ({ in: () => tv.zoomIn(), out: () => tv.zoomOut(), fit: () => tv.fit(), reset: () => tv.comfort() })[b.dataset.z]();
+    }));
     F.paste.addEventListener('click', pasteFromPhone);
     $$('[data-k]', page).forEach((b) => b.addEventListener('click', () => press(KS[b.dataset.k])));
     $$('[data-c]', page).forEach((b) => b.addEventListener('click', () => combo(b.dataset.c)));
@@ -642,6 +655,7 @@
       mount(); wrapCore();
       window.__hermesHandoff = {
         version: '0.1.0', open: () => onNavClick(true), close: () => window.switchPanel('chat'),
+        view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,
           err: S.err, closeCode: S.chan ? S.chan.closeCode : null,
           lease: S.status && S.status.lease ? { holder: S.status.lease.holder, mine: S.status.lease.mine } : null }),

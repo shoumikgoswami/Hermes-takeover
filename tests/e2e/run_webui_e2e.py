@@ -169,6 +169,112 @@ try:
     check("soft keyboard: letters, Backspace, Enter", open(OUT, encoding="utf-8", errors="replace").read().endswith("\nab\n"))
     A.screenshot(f"{SHOTS}/7-typed.png")
 
+    # ── phone gestures, against a real headed Chromium running ON the remote desktop ──────────────────────────────
+    import urllib.request as _u, base64, shutil
+    page_html = os.path.join(tempfile.gettempdir(), "handoff-touch.html")
+    open(page_html, "w").write("""<!doctype html><meta charset=utf-8><body style="margin:0;font:22px sans-serif">
+<button id=b style="position:fixed;right:40px;top:120px;width:200px;height:90px;font-size:26px" onclick="window.c=(window.c||0)+1;u()">click me</button>
+<p id=t style="position:fixed;left:30px;top:120px;width:600px">Select this sentence by holding and dragging across it, please.</p>
+<div style="height:30000px;background:linear-gradient(#fff,#ccd)"></div>
+<script>window.x=0;function u(){document.title='y='+Math.round(scrollY)+' c='+(window.c||0)+' x='+(window.x||0)}
+addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e.preventDefault()});u()</script>""")
+    tdir = tempfile.mkdtemp(prefix="handoff-touch-chrome-")
+    cenv = {**os.environ, **env}
+    cbin = os.environ.get("E2E_CHROME") or shutil.which("chromium") or shutil.which("google-chrome") or \
+        os.path.expanduser("~/.hermes/tools/chromium-1208/chrome-linux/chrome")
+    rc = subprocess.Popen([cbin, "--no-sandbox", "--password-store=basic", "--no-first-run", "--remote-debugging-port=9444",
+                           f"--user-data-dir={tdir}", "--window-position=0,0", "--window-size=1200,760", "--force-device-scale-factor=1",
+                           "file://" + page_html], env=cenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def rtab():
+        for _ in range(60):
+            try:
+                return [t for t in json.load(_u.urlopen("http://127.0.0.1:9444/json", timeout=2)) if t["type"] == "page"][0]
+            except Exception: time.sleep(0.5)
+    from cdp import Page
+    R = Page(rtab()["webSocketDebuggerUrl"])
+    def title(): return R.eval("document.title")
+    def kv(): return dict(x.split("=") for x in title().split())
+    def rect(sel):
+        return R.eval(f"(()=>{{const r=document.querySelector({sel!r}).getBoundingClientRect();return [r.left,r.top,r.width,r.height,screenX,screenY+outerHeight-innerHeight]}})()")
+    time.sleep(3)
+    A.call("Emulation.setTouchEmulationEnabled", enabled=True, maxTouchPoints=5)
+    A.call("Emulation.setDeviceMetricsOverride", width=412, height=860, deviceScaleFactor=2, mobile=True)
+    time.sleep(1.5)
+    A.wait("window.__hermesHandoff.view() && window.__hermesHandoff.view().fb[0] > 500", 20)
+    V = lambda: A.eval("window.__hermesHandoff.view()")
+    st0 = V()
+    print(f"      phone view: scale {st0['s']} (fit {st0['fit']}), desktop {st0['fb']}")
+    check("phone default zoom is more readable than fit-to-width", st0["s"] > st0["fit"] + 0.05 or st0["s"] >= 0.99, str(st0))
+    stage = A.eval("(()=>{const r=document.querySelector('#mainHandoff .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
+    def to_client(rx, ry):
+        v = V(); return stage[0] + v["tx"] + rx * v["s"], stage[1] + v["ty"] + ry * v["s"]
+    def touch(kind, pts):
+        A.call("Input.dispatchTouchEvent", type=kind, touchPoints=[{"x": x, "y": y, "id": i} for i, (x, y) in enumerate(pts)])
+    def drag(x0, y0, x1, y1, steps=14, dt=0.016, hold=0.0):
+        touch("touchStart", [(x0, y0)])
+        if hold: time.sleep(hold)
+        for i in range(1, steps + 1):
+            touch("touchMove", [(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)]); time.sleep(dt)
+        touch("touchEnd", [])
+    cx = stage[0] + stage[2] / 2; cy = stage[1] + stage[3] / 2
+
+    # one-finger drag scrolls the remote page, 1:1 with the finger
+    y_before = int(kv()["y"]); s = V()["s"]
+    drag(cx, cy + 100, cx, cy - 100, steps=20, dt=0.03)          # slow, no fling
+    time.sleep(1.5); moved = int(kv()["y"]) - y_before
+    expected = 200 / s
+    print(f"      finger moved 200 css px at scale {s}: page scrolled {moved}px (1:1 would be {expected:.0f})")
+    check("one-finger drag scrolls the remote page in the right direction", moved > 0, str(moved))
+    check("...and tracks the finger (within 25%)", abs(moved - expected) <= 0.25 * expected + 55, f"{moved} vs {expected:.0f}")
+    A.screenshot(f"{SHOTS}/8-after-scroll.png")
+    drag(cx, cy - 100, cx, cy + 100, steps=20, dt=0.03); time.sleep(1.5)
+    check("dragging the other way scrolls back up", int(kv()["y"]) < y_before + moved - 0.5 * expected, title())
+
+    # a quick flick keeps going (momentum)
+    y1 = int(kv()["y"]); drag(cx, cy + 150, cx, cy - 150, steps=6, dt=0.008); time.sleep(2.5)
+    flung = int(kv()["y"]) - y1
+    check("a quick flick scrolls further than the finger travelled (momentum)", flung > 300 / V()["s"] * 1.3, f"{flung}")
+
+    # tap on the remote button
+    bx, by, bw, bh, ox, oy = rect("#b")
+    tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
+    c0 = int(kv()["c"]); touch("touchStart", [(tx_, ty_)]); time.sleep(0.05); touch("touchEnd", []); time.sleep(1)
+    check("a tap clicks exactly where the finger is (remote button pressed once)", int(kv()["c"]) == c0 + 1, title())
+
+    # two-finger tap = right click
+    x0_ = int(kv()["x"]); touch("touchStart", [(tx_ - 30, ty_ + 60), (tx_ + 30, ty_ + 60)]); time.sleep(0.06); touch("touchEnd", []); time.sleep(1)
+    check("two-finger tap sends a right click (contextmenu on the remote page)", int(kv()["x"]) == x0_ + 1, title())
+
+    # hold then drag selects text
+    R.eval("window.scrollTo(0,0); getSelection().removeAllRanges()"); time.sleep(1)
+    px, py, pw, ph, ox, oy = rect("#t")
+    a = to_client(ox + px + 4, oy + py + 12); b = to_client(ox + px + 330, oy + py + 12)
+    drag(a[0], a[1], b[0], b[1], steps=10, dt=0.03, hold=0.65); time.sleep(1)
+    sel = R.eval("getSelection().toString()")
+    check("hold-then-drag selects text on the remote page", len(sel) > 10, repr(sel))
+
+    # pinch zoom changes the view, and taps stay accurate afterwards
+    z0 = V()["s"]
+    touch("touchStart", [(cx - 40, cy), (cx + 40, cy)])
+    for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
+    touch("touchEnd", []); time.sleep(0.4)
+    z1 = V()["s"]
+    check("pinch zooms the view in", z1 > z0 * 1.4, f"{z0} -> {z1}")
+    R.eval("window.scrollTo(0,0)"); time.sleep(1)
+    bx, by, bw, bh, ox, oy = rect("#b"); tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
+    inside = stage[0] <= tx_ <= stage[0] + stage[2] and stage[1] <= ty_ <= stage[1] + stage[3]
+    if not inside:      # pan the view so the button is visible, then tap
+        A.eval("window.__hermesHandoff.tv()._pan(%d, %d)" % (stage[0] + stage[2] / 2 - tx_, stage[1] + stage[3] / 2 - ty_)); time.sleep(0.3)
+        tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
+    c0 = int(kv()["c"]); touch("touchStart", [(tx_, ty_)]); time.sleep(0.05); touch("touchEnd", []); time.sleep(1)
+    check("taps stay accurate after zooming and panning", int(kv()["c"]) == c0 + 1, title())
+    A.screenshot(f"{SHOTS}/9-zoomed.png")
+    A.call("Emulation.setDeviceMetricsOverride", width=1280, height=900, deviceScaleFactor=1, mobile=False)
+    A.call("Emulation.setTouchEmulationEnabled", enabled=False)
+    try: R.call("Browser.close")
+    except Exception: pass
+    rc.terminate()
+
     clk(A, "#mainHandoff [data-f=back]")
     t.join(60)
     out = json.loads(box[0]) if box and box[0].startswith("{") else {"status": str(box)}

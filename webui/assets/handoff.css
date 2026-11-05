@@ -31,7 +31,8 @@ main.main.showing-x-handoff > #mainHandoff { display: flex; }
 
 .hdo-stage { position: relative; flex: 1 1 auto; min-height: 220px; background: #000; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .hdo-page.hdo-driving .hdo-stage { border-color: var(--success, #3fb950); border-width: 2px; }
-.hdo-screen { position: absolute; inset: 0; }
+.hdo-screen { position: absolute; left: 0; top: 0; width: 100%; height: 100%; will-change: transform; }
+.hdo-stage { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; overscroll-behavior: contain; }
 .hdo-screen > div { background: #000 !important; }
 .hdo-screen canvas { touch-action: none; }
 .hdo-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa; font-size: 14px; pointer-events: none; text-align: center; padding: 12px; }
@@ -58,3 +59,11 @@ main.main.showing-x-handoff > #mainHandoff { display: flex; }
 .hdo-global[hidden] { display: none; }
 .hdo-global .hdo-link { color: inherit; font-weight: 700; }
 .hdo-global-me { background: var(--success, #3fb950); }
+
+.hdo-zoom { align-self: center; min-width: 3.2em; text-align: center; font-variant-numeric: tabular-nums; opacity: .8; }
+.hdo-tap { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; pointer-events: none;
+  border: 2px solid rgba(255,255,255,.9); background: rgba(80,160,255,.35); animation: hdo-tap .45s ease-out forwards; z-index: 5; }
+.hdo-tap-right { border-color: #ffb454; background: rgba(255,180,84,.35); }
+.hdo-tap-hold { border-color: #3fb950; background: rgba(63,185,80,.4); }
+.hdo-dragging { outline: 2px solid #3fb950; outline-offset: -2px; }
+@keyframes hdo-tap { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
