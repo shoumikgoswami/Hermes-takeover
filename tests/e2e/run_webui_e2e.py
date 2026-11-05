@@ -134,7 +134,7 @@ try:
                           text=True).stdout.count("window id") or "0x" in subprocess.run(["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"],
                           env={**os.environ, **env}, capture_output=True, text=True).stdout:
             break
-        time.sleep(0.5)
+        A.eval("1"); time.sleep(0.5)          # keep reading the DevTools stream: an unread backlog kills the connection
     before_win = active_window()
     term = subprocess.Popen(["xfce4-terminal", "--hide-menubar", "-e", f"sh -c 'cat > {OUT}'"], env={**os.environ, **env},
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -142,7 +142,7 @@ try:
         w = active_window()
         if w and w != before_win:
             break
-        time.sleep(0.5)
+        A.eval("1"); time.sleep(0.5)
     time.sleep(1.5)
     A.screenshot(f"{SHOTS}/3-watching.png")
 
