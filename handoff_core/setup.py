@@ -189,7 +189,7 @@ def _run(bd, s: Dict[str, Any], line: Callable[[str], None]) -> None:
         from . import webui
         if webui.state_dir() is not None:
             line("hermes-webui detected: installing the Screen page and starting its service…")
-            res = webui.integrate(compat.current_home(), force=True)
+            res = webui.integrate(compat.current_home())      # never a forced restart: setup may be running INSIDE the sidecar
             ok = (res.get("sidecar") or {}).get("running")
             line("hermes-webui: Screen page installed." if ok else "hermes-webui: installed, but the service did not start: "
                  + str((res.get("sidecar") or {}).get("error")))

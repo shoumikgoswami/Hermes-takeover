@@ -320,6 +320,14 @@ class TestWebuiIntegration(unittest.TestCase):
         self.assertFalse((self.sd / "extensions" / "handoff").exists())
         self.assertIsNone(self.webui.installed_version(self.sd))
 
+    def test_a_process_never_stops_itself_and_setup_never_forces_a_restart(self):
+        state_file = core.state.data_dir(HOME) / "sidecar.json"
+        core.state.write_json(state_file, {"pid": os.getpid()})
+        self.assertFalse(self.webui.stop_sidecar(HOME))          # would have SIGTERMed this very test process
+        import inspect
+        src = inspect.getsource(core.setup._run)
+        self.assertNotIn("force=True", src)
+
     def test_nothing_happens_without_webui(self):
         old = os.environ.pop("HERMES_WEBUI_STATE_DIR", None)
         real = Path.home

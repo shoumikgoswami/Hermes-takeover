@@ -116,7 +116,7 @@ def stop_sidecar(home) -> bool:
     pid = info.get("pid")
     h = health()
     pid = pid or (h or {}).get("pid")
-    if not pid:
+    if not pid or int(pid) == os.getpid():            # never stop ourselves (setup can run inside the sidecar)
         return False
     try:
         os.kill(int(pid), 15)
