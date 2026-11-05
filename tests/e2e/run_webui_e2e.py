@@ -121,9 +121,29 @@ try:
     check("Take over visible once connected", has(A, "#mainTakeover [data-f=take]"))
 
     env = dict(l.split("=", 1) for l in open(f"{HOME}/bot-desktop/env").read().splitlines() if "=" in l)
+
+    def active_window():
+        try:
+            out = subprocess.run(["xprop", "-root", "_NET_ACTIVE_WINDOW"], env={**os.environ, **env}, capture_output=True, text=True, timeout=5).stdout
+            wid = out.strip().split()[-1]
+            return None if wid in ("0x0", "found.") else wid
+        except Exception:
+            return None
+    for _ in range(60):                       # a brand-new desktop: wait until the window manager is managing focus
+        if subprocess.run(["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"], env={**os.environ, **env}, capture_output=True,
+                          text=True).stdout.count("window id") or "0x" in subprocess.run(["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"],
+                          env={**os.environ, **env}, capture_output=True, text=True).stdout:
+            break
+        time.sleep(0.5)
+    before_win = active_window()
     term = subprocess.Popen(["xfce4-terminal", "--hide-menubar", "-e", f"sh -c 'cat > {OUT}'"], env={**os.environ, **env},
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(4)
+    for _ in range(60):                       # ...and until the terminal actually has focus (typed text must land in it)
+        w = active_window()
+        if w and w != before_win:
+            break
+        time.sleep(0.5)
+    time.sleep(1.5)
     A.screenshot(f"{SHOTS}/3-watching.png")
 
     # watching: nothing the page sends may reach the desktop, even if the page is poked directly
