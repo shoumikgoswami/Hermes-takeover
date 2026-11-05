@@ -264,10 +264,12 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
 
     # pinch zoom changes the view, and taps stay accurate afterwards
     z0 = V()["s"]
+    A.eval("window.__err=[]; addEventListener('error', e=>window.__err.push(e.message+' @'+e.lineno))")
     touch("touchStart", [(cx - 40, cy), (cx + 40, cy)])
     for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
     touch("touchEnd", []); time.sleep(0.4)
     z1 = V()["s"]
+    print("      page errors:", A.eval("window.__err"), "g=", A.eval("JSON.stringify(window.__hermesHandoff.tv().g)"))
     print("      pinch log:", A.eval("window.__tl.slice(-8).join(' ')"), "| view", V())
     check("pinch zooms the view in", z1 > z0 * 1.4, f"{z0} -> {z1}")
     R.eval("window.scrollTo(0,0)"); time.sleep(1)
