@@ -8,7 +8,7 @@ CHROME = os.path.expanduser("~/.hermes/tools/chromium-1208/chrome-linux/chrome")
 class Chrome:
     def __init__(self, port=9333):
         self.port = port
-        self.dir = tempfile.mkdtemp(prefix="handoff-chrome-")
+        self.dir = tempfile.mkdtemp(prefix="takeover-chrome-")
         self.proc = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--disable-gpu",
             f"--remote-debugging-port={port}", f"--user-data-dir={self.dir}", "--window-size=412,915",
             "--remote-allow-origins=*", "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

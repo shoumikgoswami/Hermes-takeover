@@ -1,4 +1,4 @@
-"""``request_handoff``: the agent asks the human to take over the screen, then (optionally) waits."""
+"""``request_takeover``: the agent asks the human to take over the screen, then (optionally) waits."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 from . import compat, control, setup, state
 
-NAME = "request_handoff"
+NAME = "request_takeover"
 DEFAULT_WAIT, MAX_WAIT = 900, 3600
 
 SCHEMA = {
@@ -52,7 +52,7 @@ def handle(args: Dict[str, Any], **kwargs: Any) -> str:
     except compat.Incompatible as exc:
         return _out("error", str(exc))
     except Exception as exc:  # noqa: BLE001 - a tool must return an error, never raise
-        return _out("error", f"request_handoff failed: {type(exc).__name__}: {exc}")
+        return _out("error", f"request_takeover failed: {type(exc).__name__}: {exc}")
 
 
 def _handle(args: Dict[str, Any]) -> str:
@@ -80,7 +80,7 @@ def _handle(args: Dict[str, Any]) -> str:
     if not control.screen(home)["running"]:
         try:
             if not control.start_screen(home)["running"]:
-                return _out("error", "The screen could not be started (see `hermes handoff status`).")
+                return _out("error", "The screen could not be started (see `hermes takeover status`).")
         except Exception as exc:  # noqa: BLE001
             return _out("error", f"The screen could not be started: {exc}")
 

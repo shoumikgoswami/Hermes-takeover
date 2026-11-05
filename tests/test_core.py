@@ -1,4 +1,4 @@
-"""Tests for Handoff's core, the dashboard routes and the agent tool.
+"""Tests for Takeover's core, the dashboard routes and the agent tool.
 
 Real hermes-agent lease + RfbClientFilter against a throwaway HERMES_HOME, real uvicorn, real WebSocket clients.
 Only the screen itself is faked (a unix socket recording the bytes the bridge lets through), so this needs no Xvnc.
@@ -21,9 +21,9 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-AGENT = os.path.expanduser(os.environ.get("HANDOFF_AGENT_DIR", "~/.hermes/hermes-agent"))
+AGENT = os.path.expanduser(os.environ.get("TAKEOVER_AGENT_DIR", "~/.hermes/hermes-agent"))
 sys.path.insert(0, AGENT)
-TMP = tempfile.mkdtemp(prefix="handoff-test-")
+TMP = tempfile.mkdtemp(prefix="takeover-test-")
 HOME = os.path.join(TMP, "home")
 os.makedirs(HOME)
 os.environ["HERMES_HOME"] = HOME
@@ -42,9 +42,9 @@ def _load(name, path, **kw):
     return mod
 
 
-core = _load("hermes_handoff_core", ROOT / "handoff_core" / "__init__.py", submodule_search_locations=[str(ROOT / "handoff_core")])
-api = _load("hermes_dashboard_plugin_handoff", ROOT / "dashboard" / "plugin_api.py")
-plugin_init = _load("handoff_plugin_init", ROOT / "__init__.py")
+core = _load("hermes_takeover_core", ROOT / "takeover_core" / "__init__.py", submodule_search_locations=[str(ROOT / "takeover_core")])
+api = _load("hermes_dashboard_plugin_takeover", ROOT / "dashboard" / "plugin_api.py")
+plugin_init = _load("takeover_plugin_init", ROOT / "__init__.py")
 
 BD = core.compat.load()
 core.webui.state_dir = lambda: None        # unit tests must never install into / spawn a service for a real hermes-webui
@@ -110,16 +110,16 @@ class Base(unittest.TestCase):
         # same-host Origin check (the real dashboard guard is exercised by tests/e2e)
         api._origin_ok = lambda ws: (ws.headers.get("origin") or "").split("//")[-1] == ws.headers.get("host")
         app = FastAPI()
-        app.include_router(api.router, prefix="/api/plugins/handoff")
+        app.include_router(api.router, prefix="/api/plugins/takeover")
         cls.port = free_port()
         cls.logs = []
 
         class H(logging.Handler):
             def emit(h, rec):
                 cls.logs.append(rec.getMessage())
-        for n in ("handoff", "handoff.bridge", "uvicorn", "uvicorn.error", "uvicorn.access"):
+        for n in ("takeover", "takeover.bridge", "uvicorn", "uvicorn.error", "uvicorn.access"):
             logging.getLogger(n).addHandler(H())
-        logging.getLogger("handoff").setLevel(logging.INFO)
+        logging.getLogger("takeover").setLevel(logging.INFO)
         cls.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=cls.port, access_log=False,
                                                    log_level="warning", ws="websockets", lifespan="off"))
         threading.Thread(target=cls.server.run, daemon=True).start()
@@ -141,7 +141,7 @@ class Base(unittest.TestCase):
 
     @classmethod
     def post(cls, path, body=None):
-        req = urllib.request.Request(f"http://127.0.0.1:{cls.port}/api/plugins/handoff{path}", method="POST",
+        req = urllib.request.Request(f"http://127.0.0.1:{cls.port}/api/plugins/takeover{path}", method="POST",
                                      data=json.dumps(body or {}).encode(), headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=5) as r:
             return json.loads(r.read())
@@ -152,7 +152,7 @@ class Base(unittest.TestCase):
         return j["viewer_id"], j["ticket"]
 
     def ws(self, ticket, origin=None):
-        return connect(f"ws://127.0.0.1:{self.port}/api/plugins/handoff/stream?ticket={ticket}",
+        return connect(f"ws://127.0.0.1:{self.port}/api/plugins/takeover/stream?ticket={ticket}",
                        origin=origin or f"http://127.0.0.1:{self.port}", subprotocols=["binary"], open_timeout=5)
 
     @staticmethod
@@ -445,9 +445,12 @@ class TestTool(Base):
             def register_cli_command(s, **kw): s.cli.append(kw["name"])
             def register_command(s, name, handler, **kw): s.cmds.append(name)
             def register_skill(s, name, path): s.skills.append((name, Path(path).exists()))
+            def register_system_prompt_section(s, id, content, **kw): s.sections = [(id, kw.get("max_chars"))]
         c = Ctx()
         plugin_init.register(c)
-        self.assertEqual((c.tools, c.cli, c.cmds, c.skills, c.hooks), (["request_handoff"], ["handoff"], ["screen"], [("handoff", True)], ["on_session_start", "pre_tool_call"]))
+        self.assertEqual((c.tools, c.cli, c.cmds, c.skills, c.hooks), (["request_takeover"], ["takeover"], ["takeover"],
+                         [("takeover", True)], ["on_session_start", "pre_tool_call", "transform_tool_result"]))
+        self.assertEqual(c.sections, [("takeover.hand-over-to-user", 2000)])
         self.assertEqual(core.tool.SCHEMA["parameters"]["required"], ["reason"])
 
 
@@ -473,9 +476,9 @@ class TestFence(Base):
             self.assertEqual((v or {}).get("action"), "block", name)
             self.assertIn("hand control back", v["message"])
 
-    def test_other_tools_and_request_handoff_are_never_blocked(self):
+    def test_other_tools_and_request_takeover_are_never_blocked(self):
         BD.lease.acquire("viewer-x", profile_key=HOME)
-        for name in ("request_handoff", "terminal", "read_file", "web_search", "clarify", ""):
+        for name in ("request_takeover", "terminal", "read_file", "web_search", "clarify", ""):
             self.assertIsNone(core.fence.check(tool_name=name), name)
 
     def test_opt_out(self):
@@ -488,6 +491,77 @@ class TestFence(Base):
         self.assertEqual(plugin_init._pre_tool_call(tool_name="browser_cdp", args={}, task_id="t")["action"], "block")
         BD.lease.release(profile_key=HOME)
         self.assertIsNone(plugin_init._pre_tool_call(tool_name="browser_cdp", args={}, task_id="t"))
+
+
+class TestNudge(Base):
+    """The prompt section + the hint on browser results that show a CAPTCHA or a code prompt."""
+    def setUp(self):
+        super().setUp()
+        self._cur = core.compat.current_home
+        core.compat.current_home = lambda: HOME
+        core.nudge._seen.clear()
+        BD.lease.release(profile_key=HOME)
+        try: os.unlink(core.state.data_dir(HOME) / "request.json")
+        except OSError: pass
+
+    def tearDown(self):
+        core.compat.current_home = self._cur
+        BD.lease.release(profile_key=HOME)
+
+    def t(self, result, tool="browser_snapshot", sid="s1"):
+        return core.nudge.transform(tool_name=tool, result=result, args={}, task_id="t", session_id=sid)
+
+    def test_guidance_names_the_tool_and_the_cases(self):
+        g = core.nudge.guidance({})
+        for needle in ("request_takeover", "CAPTCHA", "2FA", "never ask the user to paste"):
+            self.assertIn(needle.lower(), g.lower())
+        self.assertLessEqual(len(g), 2000)
+
+    def test_real_walls_are_detected(self):
+        for page in ('- iframe "reCAPTCHA" [ref=e12]', "Verify you are human by completing the action below.",
+                     "challenges.cloudflare.com/cdn-cgi", "Our systems have detected unusual traffic from your computer",
+                     "- checkbox \"I'm not a robot\"", "Press & Hold to confirm you are a human", "hcaptcha-box"):
+            self.assertEqual((core.nudge.detect(page) or ("",))[0], "captcha", page)
+        for page in ("Enter the 6-digit code we sent to +1 *** 12", "2-Step Verification", "Open your authenticator app"):
+            self.assertEqual((core.nudge.detect(page) or ("",))[0], "code", page)
+
+    def test_ordinary_pages_are_left_alone(self):
+        for page in ("r/AskReddit - What is a skill everyone should learn?", "Sign in to GitHub - Username or email",
+                     "The Captchas Of Old - a history (no)" .replace("Captchas", "Puzzles"), ""):
+            self.assertIsNone(self.t(page), page)
+
+    def test_hint_is_added_to_text_and_to_json_results(self):
+        out = self.t("page text ... reCAPTCHA ...")
+        self.assertIn("request_takeover", out); self.assertTrue(out.startswith("page text"))
+        core.nudge._seen.clear()
+        j = json.loads(self.t(json.dumps({"success": True, "snapshot": "- iframe \"reCAPTCHA\""})))
+        self.assertTrue(j["success"]); self.assertIn("request_takeover", j["takeover_hint"])
+
+    def test_once_per_conversation_and_kind(self):
+        self.assertIsNotNone(self.t("reCAPTCHA"))
+        self.assertIsNone(self.t("reCAPTCHA"))                       # same conversation, same kind: quiet
+        self.assertIsNotNone(self.t("Enter the code we sent"))       # a different kind
+        self.assertIsNotNone(self.t("reCAPTCHA", sid="s2"))          # another conversation
+
+    def test_quiet_when_the_user_already_has_it_or_a_request_is_open(self):
+        BD.lease.acquire("viewer-x", profile_key=HOME)
+        self.assertIsNone(self.t("reCAPTCHA"))
+        BD.lease.release(profile_key=HOME)
+        core.state.create_request(HOME, "solve it")
+        self.assertIsNone(self.t("reCAPTCHA", sid="s3"))
+
+    def test_only_page_reading_browser_tools_and_opt_out(self):
+        for tool in ("terminal", "read_file", "web_extract", "computer_use", "browser_cdp", "request_takeover"):
+            self.assertIsNone(self.t("reCAPTCHA", tool=tool), tool)
+        saved = core.compat.setting
+        core.compat.setting = lambda k, d=None: False if k == "captcha_hints" else d
+        try: self.assertIsNone(self.t("reCAPTCHA", sid="s9"))
+        finally: core.compat.setting = saved
+
+    def test_registered_hook_is_the_nudge_and_never_raises(self):
+        self.assertIn("request_takeover", plugin_init._transform_tool_result(tool_name="browser_navigate", result="reCAPTCHA", session_id="x"))
+        self.assertIsNone(plugin_init._transform_tool_result(tool_name="browser_navigate", result=None))
+        self.assertIsNone(plugin_init._transform_tool_result())
 
 
 class TestSetup(unittest.TestCase):
@@ -594,7 +668,7 @@ class TestSetup(unittest.TestCase):
         self.assertEqual(calls, [])
         with self.assertRaises(RuntimeError) as cm:
             core.setup.ensure_ready(self.home, timeout=1)
-        self.assertIn("hermes handoff setup", str(cm.exception))
+        self.assertIn("hermes takeover setup", str(cm.exception))
 
     def test_ensure_ready_runs_setup_and_returns(self):
         self.installer(0)

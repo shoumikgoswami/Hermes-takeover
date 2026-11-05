@@ -1,14 +1,17 @@
-name: handoff
-version: 0.2.0
+name: takeover
+version: 0.3.0
 manifest_version: 2
-description: "Take over the agent's browser from the Hermes dashboard or hermes-webui (or your phone): do a login, 2FA, CAPTCHA or payment yourself, then hand control back. Adds the request_handoff tool, a Screen tab/page, and `hermes handoff`."
-author: Handoff contributors
+description: "Take over the agent's browser from the Hermes dashboard or hermes-webui (or your phone): do a login, 2FA, CAPTCHA or payment yourself, then hand control back. Adds the request_takeover tool (the agent asks you to clear a CAPTCHA, login or 2FA step), a Screen page, and `hermes takeover`."
+author: Shoumik Goswami
+homepage: https://github.com/shoumikgoswami/Hermes-takeover
 license: MIT
 tags: [browser, dashboard, computer-use, human-in-the-loop]
 provides_tools:
-  - request_handoff
+  - request_takeover
 provides_hooks:
   - on_session_start
+  - pre_tool_call
+  - transform_tool_result
 # No extra Python packages: FastAPI/websockets ship with the dashboard and noVNC is bundled.
 # System packages (TigerVNC + Xfce) are installed on first run through Hermes's own Bot Desktop installer.
 config_schema:
@@ -19,8 +22,12 @@ config_schema:
   webui_integration:
     type: bool
     default: true
-    description: "If hermes-webui is on this host, install its Screen page and run the Handoff service for it (first agent session). Set false to never touch hermes-webui."
+    description: "If hermes-webui is on this host, install its Screen page and run the Takeover service for it (first agent session). Set false to never touch hermes-webui."
   fence_browser_tools:
     type: bool
     default: true
     description: "While a human holds the screen, refuse every browser_* tool and computer_use for this profile (closes Hermes's gap for browser.cdp_url sessions and browser_cdp)."
+  captcha_hints:
+    type: bool
+    default: true
+    description: "When a browser result shows a CAPTCHA or a one-time-code prompt, remind the agent to call request_takeover instead of trying to solve it."

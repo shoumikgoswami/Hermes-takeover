@@ -1,12 +1,12 @@
 """Loopback sidecar for hermes-webui (stdlib only).
 
 hermes-webui extensions cannot add backend routes; their backend is a loopback process reached through WebUI's
-authenticated proxy at ``/api/extensions/handoff/sidecar/...``. That proxy buffers whole responses (<= 512 KiB,
+authenticated proxy at ``/api/extensions/takeover/sidecar/...``. That proxy buffers whole responses (<= 512 KiB,
 ~10 s) and cannot carry WebSockets, so the live screen travels as **long-polling over plain HTTP**:
 
     POST /api/rfb/open   {viewer_id}            -> {sid}
     POST /api/rfb/send?sid=...   <raw RFB bytes> -> {ok}            (client -> Xvnc, through RfbClientFilter)
-    GET  /api/rfb/recv?sid=...&wait=4            -> raw RFB bytes   (Xvnc -> client; header X-Handoff-Closed: <code>)
+    GET  /api/rfb/recv?sid=...&wait=4            -> raw RFB bytes   (Xvnc -> client; header X-Takeover-Closed: <code>)
     POST /api/rfb/close?sid=...
 
 Because every byte goes through the proxy, no extra port, ticket, tunnel or CSP change is needed, and the stream is
@@ -14,7 +14,7 @@ exactly as authenticated as the rest of WebUI. The same lease gate as the dashbo
 clipboard / resize messages are dropped unless the lease says THIS viewer is the human holder.
 
 Auth (token-v1): every route except /health requires ``X-Hermes-Sidecar-Token`` equal to the token WebUI minted in
-``<state>/sidecar-auth/handoff.token`` (re-read per request): 401 on mismatch, 503 if the file is missing.
+``<state>/sidecar-auth/takeover.token`` (re-read per request): 401 on mismatch, 503 if the file is missing.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from . import PLUGIN_ID, __version__, compat, control, setup, state, tickets
 
-log = logging.getLogger("handoff.sidecar")
+log = logging.getLogger("takeover.sidecar")
 PLUGIN_FILE = Path(__file__).resolve().parent.parent / "plugin.yaml"
 
 DEFAULT_PORT = 17901
@@ -96,7 +96,7 @@ class Session:
         self._lease, self._lease_at = None, 0.0
         self.filter = bd.rfb_filter.RfbClientFilter(self.allow_input)
         self.send_lock = threading.Lock()
-        threading.Thread(target=self._reader, name=f"handoff-rfb-{self.short}", daemon=True).start()
+        threading.Thread(target=self._reader, name=f"takeover-rfb-{self.short}", daemon=True).start()
 
     # lease -----------------------------------------------------------------
     def _read_lease(self):
@@ -200,7 +200,7 @@ class Sessions:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.items: Dict[str, Session] = {}
-        threading.Thread(target=self._reap, name="handoff-reaper", daemon=True).start()
+        threading.Thread(target=self._reap, name="takeover-reaper", daemon=True).start()
 
     def open(self, home: str, viewer_id: str) -> Session:
         bd = compat.load()
@@ -238,7 +238,7 @@ class Sessions:
         touched = 0.0
         while True:
             time.sleep(2.0)
-            if not PLUGIN_FILE.exists():       # `hermes plugins remove handoff` deleted us: do not linger as an orphan
+            if not PLUGIN_FILE.exists():       # `hermes plugins remove takeover` deleted us: do not linger as an orphan
                 log.info("plugin removed; removing the WebUI extension and exiting")
                 try:
                     sys.modules[__package__ + ".webui"].orphan_cleanup()
@@ -337,19 +337,19 @@ class App:
         s = self.sessions.get(sid)
         if path in ("/api/rfb/send", "/api/rfb/recv", "/api/rfb/close"):
             if s is None:
-                return 404, {"X-Handoff-Closed": str(CLOSE_IDLE)}, b""
+                return 404, {"X-Takeover-Closed": str(CLOSE_IDLE)}, b""
         if path == "/api/rfb/send":
             if s.close_code is not None:
-                return 410, {"X-Handoff-Closed": str(s.close_code)}, b""
+                return 410, {"X-Takeover-Closed": str(s.close_code)}, b""
             try:
                 s.write(body)
             except ValueError:
                 log.info("viewer %s: closed on bad RFB framing", s.short)
                 self.sessions.drop(s.sid, CLOSE_BAD_FRAMING)
-                return 410, {"X-Handoff-Closed": str(CLOSE_BAD_FRAMING)}, b""
+                return 410, {"X-Takeover-Closed": str(CLOSE_BAD_FRAMING)}, b""
             except OSError:
                 self.sessions.drop(s.sid, CLOSE_SCREEN_OFF)
-                return 410, {"X-Handoff-Closed": str(CLOSE_SCREEN_OFF)}, b""
+                return 410, {"X-Takeover-Closed": str(CLOSE_SCREEN_OFF)}, b""
             return 204, {}, b""
         if path == "/api/rfb/recv":
             try:
@@ -359,7 +359,7 @@ class App:
             data, closed = s.recv(wait)
             hdr = {"Content-Type": "application/octet-stream"}
             if closed is not None:
-                hdr["X-Handoff-Closed"] = str(closed)
+                hdr["X-Takeover-Closed"] = str(closed)
                 if closed == CLOSE_EVICTED:
                     log.info("viewer %s: evicted (control taken)", s.short)
                 self.sessions.drop(s.sid, closed)
@@ -373,7 +373,7 @@ class App:
 def make_handler(app: App):
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
-        server_version = "handoff"
+        server_version = "takeover"
 
         def log_message(self, fmt, *args):          # never log URLs: they carry session ids
             pass
@@ -439,12 +439,12 @@ def serve(port: int = DEFAULT_PORT) -> Server:
 
 
 def main() -> int:
-    logging.basicConfig(level=getattr(logging, os.environ.get("HANDOFF_LOG", "INFO").upper(), logging.INFO), format="%(asctime)s %(name)s %(message)s")
-    port = int(os.environ.get("HANDOFF_PORT") or DEFAULT_PORT)
+    logging.basicConfig(level=getattr(logging, os.environ.get("TAKEOVER_LOG", "INFO").upper(), logging.INFO), format="%(asctime)s %(name)s %(message)s")
+    port = int(os.environ.get("TAKEOVER_PORT") or DEFAULT_PORT)
     try:
         srv = serve(port)
     except OSError as exc:
-        print(f"handoff sidecar: cannot bind 127.0.0.1:{port}: {exc}", file=sys.stderr)
+        print(f"takeover sidecar: cannot bind 127.0.0.1:{port}: {exc}", file=sys.stderr)
         return 1
     log.info("sidecar %s on 127.0.0.1:%s home=%s", __version__, port, srv.app.home)
     try:

@@ -18,7 +18,7 @@ from typing import Any, Tuple
 
 from . import compat
 
-log = logging.getLogger("handoff.bridge")
+log = logging.getLogger("takeover.bridge")
 
 CLOSE_EVICTED, CLOSE_SCREEN_OFF, CLOSE_BAD_TICKET, CLOSE_BAD_ORIGIN = 4000, 4001, 4401, 4403
 LEASE_POLL = 0.25

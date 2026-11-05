@@ -17,22 +17,22 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-AGENT = os.path.expanduser(os.environ.get("HANDOFF_AGENT_DIR", "~/.hermes/hermes-agent"))
+AGENT = os.path.expanduser(os.environ.get("TAKEOVER_AGENT_DIR", "~/.hermes/hermes-agent"))
 sys.path.insert(0, AGENT)
-TMP = tempfile.mkdtemp(prefix="handoff-sc-")
+TMP = tempfile.mkdtemp(prefix="takeover-sc-")
 HOME = os.path.join(TMP, "home")
 os.makedirs(HOME)
-TOKEN_FILE = os.path.join(TMP, "handoff.token")
+TOKEN_FILE = os.path.join(TMP, "takeover.token")
 Path(TOKEN_FILE).write_text("test-token\n")
 os.environ.update(HERMES_HOME=HOME, HERMES_EXT_SIDECAR_TOKEN_FILE=TOKEN_FILE)
 
-if "hermes_handoff_core" not in sys.modules:
-    spec = importlib.util.spec_from_file_location("hermes_handoff_core", ROOT / "handoff_core" / "__init__.py",
-                                                  submodule_search_locations=[str(ROOT / "handoff_core")])
+if "hermes_takeover_core" not in sys.modules:
+    spec = importlib.util.spec_from_file_location("hermes_takeover_core", ROOT / "takeover_core" / "__init__.py",
+                                                  submodule_search_locations=[str(ROOT / "takeover_core")])
     core = importlib.util.module_from_spec(spec)
-    sys.modules["hermes_handoff_core"] = core
+    sys.modules["hermes_takeover_core"] = core
     spec.loader.exec_module(core)
-core = sys.modules["hermes_handoff_core"]
+core = sys.modules["hermes_takeover_core"]
 sc = core.sidecar
 BD = core.compat.load()
 _real_state_dir = core.webui.state_dir
@@ -87,7 +87,7 @@ class Base(unittest.TestCase):
 
         class H(logging.Handler):
             def emit(h, rec): cls.logs.append(rec.getMessage())
-        logging.getLogger("handoff").addHandler(H()); logging.getLogger("handoff").setLevel(logging.INFO)
+        logging.getLogger("takeover").addHandler(H()); logging.getLogger("takeover").setLevel(logging.INFO)
         cls.app = sc.App()
         cls.srv = sc.Server(("127.0.0.1", 0), sc.make_handler(cls.app))
         cls.port = cls.srv.server_address[1]
@@ -131,7 +131,7 @@ class Base(unittest.TestCase):
         while time.time() < end:
             st, h, d = self.recv(sid, 0.3)
             got += d
-            if h.get("x-handoff-closed"): return got, int(h["x-handoff-closed"])
+            if h.get("x-takeover-closed"): return got, int(h["x-takeover-closed"])
             if until and until in got: break
         return got, None
 
@@ -170,7 +170,7 @@ class TestAuth(Base):
 
     def test_stream_calls_with_an_unknown_session_say_it_is_closed(self):
         st, h, _ = self.recv("nope")
-        self.assertEqual((st, h.get("x-handoff-closed")), (404, str(sc.CLOSE_IDLE)))
+        self.assertEqual((st, h.get("x-takeover-closed")), (404, str(sc.CLOSE_IDLE)))
 
 
 class TestStream(Base):
@@ -224,7 +224,7 @@ class TestStream(Base):
     def test_bad_framing_closes_with_1008(self):
         _, sid = self.open()
         st, h, _ = self.send(sid, HS + bytes([99]))
-        self.assertEqual((st, h.get("x-handoff-closed")), (410, "1008"))
+        self.assertEqual((st, h.get("x-takeover-closed")), (410, "1008"))
 
     def test_closing_a_session_is_clean_and_idempotent(self):
         _, sid = self.open()
@@ -321,33 +321,33 @@ class TestWebuiIntegration(unittest.TestCase):
         r = self.webui.install_extension(self.sd)
         self.assertTrue(r["installed"])
         man = json.loads((self.sd / "extension-install-manifest.json").read_text())
-        e = man["installed"]["handoff"]
+        e = man["installed"]["takeover"]
         self.assertEqual(e["version"], core.__version__)
-        self.assertIn("manifest.json", e["files"]); self.assertIn("assets/handoff.js", e["files"])
+        self.assertIn("manifest.json", e["files"]); self.assertIn("assets/takeover.js", e["files"])
         self.assertIn("assets/novnc/core/rfb.js", e["files"])
         self.assertEqual(self.webui.installed_version(self.sd), core.__version__)
         self.webui.install_extension(self.sd)
         self.assertEqual(len(json.loads((self.sd / "extension-install-manifest.json").read_text())["installed"]), 1)
 
-    def test_sidecar_port_follows_HANDOFF_PORT(self):
-        old = os.environ.get("HANDOFF_PORT")
-        os.environ["HANDOFF_PORT"] = "17951"
+    def test_sidecar_port_follows_TAKEOVER_PORT(self):
+        old = os.environ.get("TAKEOVER_PORT")
+        os.environ["TAKEOVER_PORT"] = "17951"
         try:
             self.webui.install_extension(self.sd)
         finally:
-            os.environ.pop("HANDOFF_PORT") if old is None else os.environ.__setitem__("HANDOFF_PORT", old)
-        man = json.loads((self.sd / "extensions" / "handoff" / "manifest.json").read_text())
+            os.environ.pop("TAKEOVER_PORT") if old is None else os.environ.__setitem__("TAKEOVER_PORT", old)
+        man = json.loads((self.sd / "extensions" / "takeover" / "manifest.json").read_text())
         self.assertEqual(man["extensions"][0]["sidecar"]["origin"], "http://127.0.0.1:17951")
 
     def test_other_installed_extensions_are_preserved(self):
         (self.sd / "extension-install-manifest.json").write_text(json.dumps({"version": 1, "installed": {"btop": {"version": "1", "files": ["manifest.json"], "installed_at": "x"}}}))
         self.webui.install_extension(self.sd)
-        self.assertEqual(set(json.loads((self.sd / "extension-install-manifest.json").read_text())["installed"]), {"btop", "handoff"})
+        self.assertEqual(set(json.loads((self.sd / "extension-install-manifest.json").read_text())["installed"]), {"btop", "takeover"})
 
     def test_uninstall_removes_files_and_entry(self):
         self.webui.install_extension(self.sd)
         self.webui.uninstall_extension(self.sd)
-        self.assertFalse((self.sd / "extensions" / "handoff").exists())
+        self.assertFalse((self.sd / "extensions" / "takeover").exists())
         self.assertIsNone(self.webui.installed_version(self.sd))
 
     def test_a_process_never_stops_itself_and_setup_never_forces_a_restart(self):

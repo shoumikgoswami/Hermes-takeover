@@ -1,4 +1,4 @@
-"""Backend routes for the Screen tab, mounted by the dashboard at /api/plugins/handoff/.
+"""Backend routes for the Screen tab, mounted by the dashboard at /api/plugins/takeover/.
 
 HTTP routes are behind the dashboard's own auth (session token / OAuth). The WebSocket stream is not covered by
 HTTP middleware, so it is admitted only with a one-time ticket minted by an authenticated route, plus the
@@ -15,14 +15,14 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Body, WebSocket
 
-_CORE = "hermes_handoff_core"
-log = logging.getLogger("handoff")
+_CORE = "hermes_takeover_core"
+log = logging.getLogger("takeover")
 
 
 def _load_core():
     if _CORE in sys.modules:
         return sys.modules[_CORE]
-    root = Path(__file__).resolve().parent.parent / "handoff_core"
+    root = Path(__file__).resolve().parent.parent / "takeover_core"
     spec = importlib.util.spec_from_file_location(_CORE, root / "__init__.py", submodule_search_locations=[str(root)])
     mod = importlib.util.module_from_spec(spec)
     sys.modules[_CORE] = mod
@@ -36,7 +36,7 @@ def _load_core():
 
 core = _load_core()
 router = APIRouter()
-STREAM = "/api/plugins/handoff/stream"
+STREAM = "/api/plugins/takeover/stream"
 
 
 def _home() -> str:

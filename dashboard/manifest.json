@@ -1,11 +1,11 @@
 {
-  "name": "handoff",
+  "name": "takeover",
   "label": "Screen",
   "description": "See and take over the agent's browser; hand control back when you are done.",
   "icon": "Eye",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "tab": {
-    "path": "/handoff",
+    "path": "/takeover",
     "position": "after:sessions"
   },
   "slots": [

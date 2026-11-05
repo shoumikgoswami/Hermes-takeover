@@ -6,11 +6,11 @@ This module does both halves for the user, with no manual steps beyond WebUI's o
 
 * ``install_extension``  copy the bundled extension into WebUI's extension dir and record it exactly like the
                          WebUI gallery does (loads on the next page render; no WebUI restart)
-* ``ensure_sidecar``     start ``handoff_core.sidecar`` detached if it is not already answering on 127.0.0.1:17901
-* ``integrate``          detect WebUI; do both; called automatically on first agent session and by ``hermes handoff setup``
+* ``ensure_sidecar``     start ``takeover_core.sidecar`` detached if it is not already answering on 127.0.0.1:17901
+* ``integrate``          detect WebUI; do both; called automatically on first agent session and by ``hermes takeover setup``
 
 WebUI state dir: ``$HERMES_WEBUI_STATE_DIR`` (set whenever WebUI itself runs the agent), else ``~/.hermes/webui``.
-Consent (Settings -> Extensions -> Diagnostics -> Loopback sidecars -> Handoff -> Approve) is WebUI's security
+Consent (Settings -> Extensions -> Diagnostics -> Loopback sidecars -> Takeover -> Approve) is WebUI's security
 decision and is deliberately left to the user; it requires WebUI authentication to be on (token-v1).
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ def state_dir() -> Optional[Path]:
 
 def port() -> int:
     try:
-        return int(os.environ.get("HANDOFF_PORT") or DEFAULT_PORT)
+        return int(os.environ.get("TAKEOVER_PORT") or DEFAULT_PORT)
     except ValueError:
         return DEFAULT_PORT
 
@@ -76,7 +76,7 @@ def install_extension(sd: Optional[Path] = None) -> Dict[str, Any]:
         shutil.rmtree(dest)
     shutil.copytree(SRC, dest)
     shutil.copytree(NOVNC, dest / "assets" / "novnc")          # one copy of noVNC in the repo; copied at install
-    man_path = dest / "manifest.json"                          # the sidecar port is baked into the manifest (HANDOFF_PORT)
+    man_path = dest / "manifest.json"                          # the sidecar port is baked into the manifest (TAKEOVER_PORT)
     manifest = json.loads(man_path.read_text(encoding="utf-8"))
     for ext in manifest.get("extensions", []):
         if isinstance(ext.get("sidecar"), dict):
@@ -142,13 +142,13 @@ def ensure_sidecar(home, restart: bool = False) -> Dict[str, Any]:
         if h and not restart and h.get("version") == __version__:
             other = bool(h.get("home_id")) and h["home_id"] != home_id(home)
             # a sidecar serves ONE Hermes home (the control lease lives there). The first one wins; an explicit
-            # `hermes handoff webui` takes over for this profile.
+            # `hermes takeover webui` takes over for this profile.
             return {"running": True, "started": False, "version": h.get("version"), "other_profile": other}
         if h:                                                   # stale version, or an explicit restart
             stop_sidecar(home)
         sd = state_dir()
         env = dict(os.environ)
-        env.update(HERMES_HOME=str(home), HANDOFF_PORT=str(port()))
+        env.update(HERMES_HOME=str(home), TAKEOVER_PORT=str(port()))
         if sd:
             env["HERMES_WEBUI_STATE_DIR"] = str(sd)
         agent_dir = str(Path(compat.load().hc.__file__).resolve().parent)
@@ -164,7 +164,7 @@ def ensure_sidecar(home, restart: bool = False) -> Dict[str, Any]:
             if proc.poll() is not None:
                 break
             time.sleep(0.1)
-        return {"running": False, "started": True, "error": "the sidecar did not come up; see handoff/sidecar.log"}
+        return {"running": False, "started": True, "error": "the sidecar did not come up; see takeover/sidecar.log"}
     except Exception as exc:  # noqa: BLE001
         return {"running": False, "started": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
 
@@ -179,7 +179,7 @@ def status(home) -> Dict[str, Any]:
 
 
 def enabled() -> bool:
-    """``plugins.entries.handoff.settings.webui_integration`` (default on): set false to never touch hermes-webui."""
+    """``plugins.entries.takeover.settings.webui_integration`` (default on): set false to never touch hermes-webui."""
     return bool(compat.setting("webui_integration", True))
 
 

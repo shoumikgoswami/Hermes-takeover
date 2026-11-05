@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 from cdp import Chrome
 
 HOME = os.environ["E2E_HOME"]
-SHOTS = os.environ.get("E2E_SHOTS", tempfile.mkdtemp(prefix="handoff-shots-")); os.makedirs(SHOTS, exist_ok=True)
+SHOTS = os.environ.get("E2E_SHOTS", tempfile.mkdtemp(prefix="takeover-shots-")); os.makedirs(SHOTS, exist_ok=True)
 URL = os.environ.get("E2E_URL", "http://127.0.0.1:9199")
-OUT = os.path.join(tempfile.gettempdir(), "handoff-typed.txt")
+OUT = os.path.join(tempfile.gettempdir(), "takeover-typed.txt")
 AGENT_DIR = os.path.expanduser("~/.hermes/hermes-agent")
 results = []
 
@@ -39,9 +39,9 @@ def run_tool(args, results_box):
     code = f"""
 import sys, os, json, importlib.util
 sys.path.insert(0, {AGENT_DIR!r}); os.environ['HERMES_HOME']={HOME!r}
-root = os.path.join({HOME!r}, 'plugins', 'handoff', 'handoff_core')
-spec = importlib.util.spec_from_file_location('hermes_handoff_core', os.path.join(root, '__init__.py'), submodule_search_locations=[root])
-m = importlib.util.module_from_spec(spec); sys.modules['hermes_handoff_core'] = m; spec.loader.exec_module(m)
+root = os.path.join({HOME!r}, 'plugins', 'takeover', 'takeover_core')
+spec = importlib.util.spec_from_file_location('hermes_takeover_core', os.path.join(root, '__init__.py'), submodule_search_locations=[root])
+m = importlib.util.module_from_spec(spec); sys.modules['hermes_takeover_core'] = m; spec.loader.exec_module(m)
 print(m.tool.handle({args!r}))
 """
     p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=240)
@@ -50,7 +50,7 @@ print(m.tool.handle({args!r}))
 chrome = Chrome()
 term = None
 try:
-    A = chrome.new_page(f"{URL}/handoff")
+    A = chrome.new_page(f"{URL}/takeover")
     A.wait(f"!!document.querySelector('{tid('state')}')", 30)
     check("Screen tab renders", True)
     A.wait(f"(document.querySelector('{tid('state')}')||{{}}).textContent==='Screen is off'", 15)
@@ -72,7 +72,7 @@ try:
     def http(token):
         h = {"Content-Type": "application/json"}
         if token: h["X-Hermes-Session-Token"] = token
-        return urllib.request.Request(f"{URL}/api/plugins/handoff/ticket", data=b"{}", method="POST", headers=h)
+        return urllib.request.Request(f"{URL}/api/plugins/takeover/ticket", data=b"{}", method="POST", headers=h)
     try:
         urllib.request.urlopen(http(None)); unauth = 200
     except urllib.error.HTTPError as e:
@@ -81,7 +81,7 @@ try:
     def mint(): return json.loads(urllib.request.urlopen(http(TOKEN)).read())["ticket"]
     def ws_try(ticket, origin):
         try:
-            with connect(f"ws{URL[4:]}/api/plugins/handoff/stream?ticket={ticket}", origin=origin, subprotocols=["binary"], open_timeout=10) as w:
+            with connect(f"ws{URL[4:]}/api/plugins/takeover/stream?ticket={ticket}", origin=origin, subprotocols=["binary"], open_timeout=10) as w:
                 w.recv(timeout=5); return "open"
         except ConnectionClosed as e:
             return e.rcvd.code if e.rcvd else None
@@ -139,13 +139,13 @@ try:
     t.join(60)
     out = json.loads(box[0]) if box and box[0].startswith("{") else {"status": "no result: " + str(box)}
     check("hand back: the waiting tool call returns 'completed' by itself", out.get("status") == "completed", out)
-    check("lease is the agent's again; request closed", L.get().holder == "agent" and json.load(open(f"{HOME}/handoff/request.json"))["status"] == "done")
+    check("lease is the agent's again; request closed", L.get().holder == "agent" and json.load(open(f"{HOME}/plugin-data/takeover/request.json"))["status"] == "done")
     A.screenshot(f"{SHOTS}/6-handed-back.png")
 
     # ── second device evicts the first ──
     A.wait(f"!!document.querySelector('{tid('take')}')", 10)
     A.click(tid("take")); A.wait(f"!!document.querySelector('{tid('back')}')", 10)
-    C = chrome.new_page(f"{URL}/handoff")
+    C = chrome.new_page(f"{URL}/takeover")
     C.wait(f"!!document.querySelector('{tid('take')}')", 30)
     C.click(tid("take")); C.wait(f"!!document.querySelector('{tid('back')}')", 10)
     A.wait(f"!document.querySelector('{tid('back')}')", 15)
@@ -158,7 +158,7 @@ try:
     # ── tab closed mid-takeover ──
     C.call("Page.close"); time.sleep(3)
     check("holder's tab closed: agent stays locked out", L.get().holder == "human")
-    D = chrome.new_page(f"{URL}/handoff")
+    D = chrome.new_page(f"{URL}/takeover")
     D.wait("document.body.innerText.toLowerCase().includes('force hand-back')", 30)
     check("reopened page offers Force hand-back", True)
     D.eval("window.confirm=()=>true"); D.eval("[...document.querySelectorAll('.hdo-link')].find(b=>/force hand-back/i.test(b.textContent)).click()")

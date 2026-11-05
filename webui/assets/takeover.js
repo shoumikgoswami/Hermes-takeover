@@ -1,15 +1,15 @@
-/* Handoff for hermes-webui: the Screen page. See the agent's browser live, take over, hand back.
+/* Takeover for hermes-webui: the Screen page. See the agent's browser live, take over, hand back.
    Backend = the plugin's loopback sidecar behind WebUI's authenticated proxy. The live view is noVNC running over a
    long-poll HTTP channel (HttpChannel below) because that proxy cannot carry WebSockets. noVNC 1.6.0 is bundled. */
 (() => {
   'use strict';
-  if (window.__hermesHandoff) return;
+  if (window.__hermesTakeover) return;
 
-  const PANEL = 'x-handoff';
-  const BASE = '/api/extensions/handoff/sidecar';
+  const PANEL = 'x-takeover';
+  const BASE = '/api/extensions/takeover/sidecar';
   const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
-  const ASSETS = SCRIPT_SRC ? new URL('.', SCRIPT_SRC).pathname : '/extensions/handoff/assets/';
-  const VIEWER_KEY = 'hermesExt:handoff:viewer';       // sessionStorage: one viewer id per browser tab
+  const ASSETS = SCRIPT_SRC ? new URL('.', SCRIPT_SRC).pathname : '/extensions/takeover/assets/';
+  const VIEWER_KEY = 'hermesExt:takeover:viewer';       // sessionStorage: one viewer id per browser tab
 
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -18,7 +18,7 @@
   const sidebarCollapsed = () => (typeof _isSidebarCollapsed === 'function' ? _isSidebarCollapsed() : false);
   function toast(msg, type) {
     if (typeof showToast === 'function') { try { showToast(msg, undefined, type); return; } catch (_) { /* fall through */ } }
-    console.log('[handoff] ' + msg);
+    console.log('[takeover] ' + msg);
   }
 
   const ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
@@ -96,7 +96,7 @@
             r = await fetch(this._url('/api/rfb/send'), { method: 'POST', credentials: 'same-origin', cache: 'no-store',
               headers: { 'Content-Type': 'application/octet-stream' }, body });
           } catch (_) { this._fail(1006); return; }
-          if (r.status === 410 || r.status === 404) { this._finish(parseInt(r.headers.get('X-Handoff-Closed'), 10) || 4408); return; }
+          if (r.status === 410 || r.status === 404) { this._finish(parseInt(r.headers.get('X-Takeover-Closed'), 10) || 4408); return; }
           if (!r.ok) { this._fail(1011); return; }
         }
       } finally { this._sending = false; }
@@ -111,7 +111,7 @@
           if (++this._fails >= 4) { this._fail(1006); return; }
           await sleep(400 * this._fails); continue;
         }
-        const closed = parseInt(r.headers.get('X-Handoff-Closed'), 10);
+        const closed = parseInt(r.headers.get('X-Takeover-Closed'), 10);
         if (r.status === 404 || r.status === 410) { this._finish(closed || 4408); return; }
         if (!r.ok) {
           if (++this._fails >= 4) { this._fail(r.status === 401 || r.status === 403 ? 4401 : 1011); return; }
@@ -187,20 +187,20 @@
     guardEdgeSwipe();
     const main = $('main.main'); const rail = $('.rail');
     if (!main) return false;
-    page = document.getElementById('mainHandoff');
+    page = document.getElementById('mainTakeover');
     if (!page) {
       page = document.createElement('div');
-      page.id = 'mainHandoff'; page.className = 'main-view hdo-page';
+      page.id = 'mainTakeover'; page.className = 'main-view hdo-page';
       page.setAttribute('role', 'region'); page.setAttribute('aria-label', 'Agent screen');
       page.innerHTML = pageHtml();
       main.appendChild(page);
     }
     $$('[data-f]', page).forEach((el) => { F[el.dataset.f] = el; });
     const sideHost = document.getElementById('panelInsights') || $('.sidebar .panel-view');
-    side = $('.panel-view[data-panel-token="handoff"]');
+    side = $('.panel-view[data-panel-token="takeover"]');
     if (!side && sideHost) {
       side = document.createElement('div');
-      side.className = 'panel-view hdo-sidepanel'; side.id = 'panelXHandoff'; side.dataset.panelToken = 'handoff';
+      side.className = 'panel-view hdo-sidepanel'; side.id = 'panelXTakeover'; side.dataset.panelToken = 'takeover';
       side.innerHTML = '<div class="hdo-side"><div class="hdo-side-title">Screen</div><div class="hdo-side-body">See and take over the agent\'s browser: logins, 2FA, CAPTCHAs, payments.</div></div>';
       sideHost.parentNode.appendChild(side);
     }
@@ -356,15 +356,15 @@
   function describe() {
     const e = S.err;
     if (e) {
-      if (e.error === 'incompatible') return { dot: 'err', text: 'Hermes changed under Handoff', hint: e.message };
-      if (e.http === 401 || e.http === 403) return { dot: 'err', text: 'Waiting for your approval', hint: 'Approve Handoff in Settings → Extensions → Diagnostics → Loopback sidecars → Handoff → Approve proxy. WebUI authentication must be on (Settings → set a password).' };
-      if (e.http === 503) return { dot: 'err', text: 'Waiting for your approval', hint: 'Approve Handoff in Settings → Extensions → Diagnostics → Loopback sidecars, then reload.' };
-      return { dot: 'err', text: 'Handoff service is not running', hint: 'It starts with your next agent chat. To start it now run: hermes handoff setup', };
+      if (e.error === 'incompatible') return { dot: 'err', text: 'Hermes changed under Takeover', hint: e.message };
+      if (e.http === 401 || e.http === 403) return { dot: 'err', text: 'Waiting for your approval', hint: 'Approve Takeover in Settings → Extensions → Diagnostics → Loopback sidecars → Takeover → Approve proxy. WebUI authentication must be on (Settings → set a password).' };
+      if (e.http === 503) return { dot: 'err', text: 'Waiting for your approval', hint: 'Approve Takeover in Settings → Extensions → Diagnostics → Loopback sidecars, then reload.' };
+      return { dot: 'err', text: 'Takeover service is not running', hint: 'It starts with your next agent chat. To start it now run: hermes takeover setup', };
     }
     const st = S.status;
     if (!st) return { dot: 'wait', text: 'Connecting…' };
     const r = st.readiness; const setup = st.setup || {}; const scr = st.screen || {}; const lease = st.lease || {};
-    if (!r.supported) return { dot: 'err', text: 'Not supported on this host', hint: 'Handoff needs a Linux host (Bot Desktop).' };
+    if (!r.supported) return { dot: 'err', text: 'Not supported on this host', hint: 'Takeover needs a Linux host (Bot Desktop).' };
     if (!r.ready) {
       if (setup.state === 'running') return { dot: 'wait', text: 'Setting up the screen… (first run)' };
       if (setup.state === 'needs_manual') return { dot: 'err', text: 'One manual step needed', hint: setup.error };
@@ -482,7 +482,7 @@
       });
       rfb.addEventListener('disconnect', () => setTimeout(() => onClosed(gen), 0));
     } catch (e) {
-      console.warn('[handoff] connect failed', e);
+      console.warn('[takeover] connect failed', e);
       S.rfb = null; S.chan = null; S.connecting = false; scheduleReconnect();
     }
     render();
@@ -511,7 +511,7 @@
     } else if (code === 4001) {                // screen stopped
       S.note = 'The screen stopped.'; refresh().then(() => { reconcile(); render(); });
     } else if (code === 4401) {                // proxy refused: consent revoked / auth expired
-      S.note = 'WebUI refused the request. Reload the page; if it persists re-approve Handoff in Settings → Extensions.';
+      S.note = 'WebUI refused the request. Reload the page; if it persists re-approve Takeover in Settings → Extensions.';
     } else if (code === 1008) {
       S.note = 'The screen sent something the viewer could not understand. Reconnecting.'; scheduleReconnect(800);
     } else {
@@ -672,8 +672,8 @@
     attempt = attempt || 0;
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
       mount(); wrapCore();
-      window.__hermesHandoff = {
-        version: '0.2.0', open: () => onNavClick(true), close: () => window.switchPanel('chat'),
+      window.__hermesTakeover = {
+        version: '0.3.0', open: () => onNavClick(true), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,
           err: S.err, closeCode: S.chan ? S.chan.closeCode : null,
@@ -683,9 +683,9 @@
       return;
     }
     if (attempt < 100) setTimeout(() => install(attempt + 1), 150);
-    else console.warn('[handoff] WebUI shell not found; not installed');
+    else console.warn('[takeover] WebUI shell not found; not installed');
   }
-  window.__hermesHandoff = window.__hermesHandoff || null;
+  window.__hermesTakeover = window.__hermesTakeover || null;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => install(), { once: true });
   else install();
 })();

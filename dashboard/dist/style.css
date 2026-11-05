@@ -1,4 +1,4 @@
-/* Handoff: Screen tab. Theme-aware via the dashboard's --color-* tokens; every class is prefixed hdo-. */
+/* Takeover: Screen tab. Theme-aware via the dashboard's --color-* tokens; every class is prefixed hdo-. */
 .hdo-page { display: flex; flex-direction: column; gap: 8px; min-height: calc(100vh - 9rem); color: var(--color-foreground, inherit); }
 .hdo-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .hdo-state { display: flex; align-items: center; gap: 8px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }

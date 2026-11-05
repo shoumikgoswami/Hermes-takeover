@@ -1,6 +1,6 @@
 """First-run setup: make this host able to show the agent's screen, without the user doing anything.
 
-What Handoff needs that a stock Hermes host may lack:
+What Takeover needs that a stock Hermes host may lack:
 
 1. the Bot Desktop packages (TigerVNC + Xfce) - installed through Hermes's own installer
    (``tools.bot_desktop.install``), which needs root without a password prompt, or you run the printed command;
@@ -9,8 +9,8 @@ What Handoff needs that a stock Hermes host may lack:
 3. ``browser.headed: true`` so the agent's Chrome opens on that screen (set with Hermes's config API).
 
 There are no extra Python dependencies: FastAPI/websockets come with the dashboard, noVNC ships in the
-plugin. Setup runs automatically once on first use (opt out: ``plugins.entries.handoff.settings.auto_install: false``)
-and again on demand (``hermes handoff setup``, the Screen tab's button, or the agent tool).
+plugin. Setup runs automatically once on first use (opt out: ``plugins.entries.takeover.settings.auto_install: false``)
+and again on demand (``hermes takeover setup``, the Screen tab's button, or the agent tool).
 """
 from __future__ import annotations
 
@@ -151,7 +151,7 @@ def run_setup(home, on_line: Optional[Callable[[str], None]] = None) -> Dict[str
 def _run(bd, s: Dict[str, Any], line: Callable[[str], None]) -> None:
     rt = bd.runtime
     if not rt.is_supported_host():
-        s.update(state="failed", error="Handoff needs a Linux host (Bot Desktop is Linux-only).")
+        s.update(state="failed", error="Takeover needs a Linux host (Bot Desktop is Linux-only).")
         line(s["error"])
         return
 
@@ -206,7 +206,7 @@ def start_async(home) -> bool:
         t = _threads.get(home)
         if t and t.is_alive():
             return False
-        t = threading.Thread(target=run_setup, args=(home,), name="handoff-setup", daemon=True)
+        t = threading.Thread(target=run_setup, args=(home,), name="takeover-setup", daemon=True)
         _threads[home] = t
         t.start()
         return True
@@ -231,9 +231,9 @@ def ensure_ready(home, timeout: float = 600.0) -> Dict[str, Any]:
     if r["ready"]:
         return r
     if not r["supported"]:
-        raise RuntimeError("Handoff needs a Linux host with Bot Desktop; this host is not supported.")
+        raise RuntimeError("Takeover needs a Linux host with Bot Desktop; this host is not supported.")
     if not compat.setting("auto_install", True) and setup_state(home)["state"] != "running":
-        raise RuntimeError("Handoff is not set up and auto_install is off. Run: hermes handoff setup")
+        raise RuntimeError("Takeover is not set up and auto_install is off. Run: hermes takeover setup")
     start_async(home)
     end = time.time() + timeout
     while time.time() < end:
@@ -245,4 +245,4 @@ def ensure_ready(home, timeout: float = 600.0) -> Dict[str, Any]:
     if r["ready"]:
         return r
     s = setup_state(home)
-    raise RuntimeError(s.get("error") or "Handoff setup is still running; try again in a minute.")
+    raise RuntimeError(s.get("error") or "Takeover setup is still running; try again in a minute.")

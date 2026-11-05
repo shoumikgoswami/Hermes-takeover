@@ -1,4 +1,4 @@
-/* Handoff touch layer: drive a remote desktop from a phone.
+/* Takeover touch layer: drive a remote desktop from a phone.
 
    noVNC's own touch handling is built for tablets: fit-to-width makes a 1440 px desktop unreadably small and scrolling
    needs a precise two-finger drag. This layer replaces it with a phone-first model and owns the view transform

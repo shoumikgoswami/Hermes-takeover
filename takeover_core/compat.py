@@ -1,6 +1,6 @@
 """The only module that imports hermes-agent internals, with symbol checks.
 
-Handoff builds on Bot Desktop (``tools.bot_desktop``): the control lease, the RFB input filter and the
+Takeover builds on Bot Desktop (``tools.bot_desktop``): the control lease, the RFB input filter and the
 screen runtime. Those are internals without a frozen API, so every symbol we use is verified once and a
 mismatch surfaces as ``Incompatible`` with a message the UI/CLI can show, instead of a stack trace mid-takeover.
 """
@@ -48,8 +48,8 @@ def load() -> SimpleNamespace:
             if not hasattr(hc, s):
                 missing.append(f"hermes_constants.{s}")
         if missing:
-            raise Incompatible("This Hermes changed under Handoff: missing " + ", ".join(missing)
-                               + ". Update the plugin: hermes plugins update handoff")
+            raise Incompatible("This Hermes changed under Takeover: missing " + ", ".join(missing)
+                               + ". Update the plugin: hermes plugins update takeover")
         _bd = SimpleNamespace(hc=hc, **mods)
         return _bd
 
@@ -70,10 +70,10 @@ def home_scope(home):
 
 
 def setting(key: str, default=None):
-    """``plugins.entries.handoff.settings.<key>`` from config.yaml (read-only, any process)."""
+    """``plugins.entries.takeover.settings.<key>`` from config.yaml (read-only, any process)."""
     try:
         from hermes_cli.config import load_config_readonly
-        entry = ((load_config_readonly().get("plugins") or {}).get("entries") or {}).get("handoff") or {}
+        entry = ((load_config_readonly().get("plugins") or {}).get("entries") or {}).get("takeover") or {}
         return (entry.get("settings") or {}).get(key, default)
     except Exception:  # noqa: BLE001
         return default

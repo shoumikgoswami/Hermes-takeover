@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from . import __version__, compat, setup, state, tickets
 
-log = logging.getLogger("handoff")
+log = logging.getLogger("takeover")
 _start: Dict[str, Dict[str, Any]] = {}
 _start_lock = threading.Lock()
 START_TIMEOUT = 25.0
@@ -52,7 +52,7 @@ def start_screen_async(home) -> bool:
             log.warning("screen start failed: %s", type(exc).__name__)
         with _start_lock:
             _start[home] = new
-    threading.Thread(target=work, name="handoff-screen-start", daemon=True).start()
+    threading.Thread(target=work, name="takeover-screen-start", daemon=True).start()
     return True
 
 

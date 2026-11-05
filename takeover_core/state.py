@@ -1,4 +1,6 @@
-"""Small cross-process state under ``<HERMES_HOME>/handoff/`` (the tool runs in the agent process, the
+"""Small cross-process state under ``<HERMES_HOME>/plugin-data/takeover/`` (Hermes's per-plugin data root, which
+survives ``hermes plugins update``/``remove``; same path ``plugins.plugin_storage.plugin_data_dir`` gives, but for an
+explicit home because the dashboard and the WebUI service serve a home that is not necessarily the active one) (the tool runs in the agent process, the
 dashboard in another; files are the shared truth, same as the Bot Desktop lease).
 
 * ``request.json``  the agent's "I need you" request (reason, status)
@@ -19,7 +21,7 @@ REQUEST_TTL = 3600.0       # a pending request nobody acted on for an hour is st
 
 
 def data_dir(home) -> Path:
-    d = Path(str(home)) / "handoff"
+    d = Path(str(home)) / "plugin-data" / "takeover"
     d.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(d, 0o700)

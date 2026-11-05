@@ -4,7 +4,7 @@ users install it. Everything the browser does goes through WebUI's authenticated
   S=<scratch HERMES_HOME>  W=<scratch WebUI state dir>
   HERMES_HOME=$S hermes plugins install file://<repo> --enable --yes-deps
   (start hermes-webui with HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W HERMES_WEBUI_PASSWORD=e2e-pass-123 HERMES_WEBUI_PORT=8798 ...)
-  HANDOFF_PORT=17951 HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W hermes handoff webui
+  TAKEOVER_PORT=17951 HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W hermes takeover webui
   E2E_HOME=$S E2E_STATE=$W <hermes-venv-python> tests/e2e/run_webui_e2e.py
 """
 import json, os, subprocess, sys, tempfile, threading, time, urllib.error, urllib.request
@@ -13,11 +13,11 @@ from cdp import Chrome
 
 HOME = os.environ["E2E_HOME"]
 STATE = os.environ["E2E_STATE"]            # the scratch WebUI's state dir
-PORT = os.environ.get("HANDOFF_PORT", "17901")   # use a spare port so a real Handoff service on this host is not disturbed
+PORT = os.environ.get("TAKEOVER_PORT", "17901")   # use a spare port so a real Takeover service on this host is not disturbed
 URL = os.environ.get("E2E_URL", "http://127.0.0.1:8798")
 PASSWORD = os.environ.get("E2E_PASSWORD", "e2e-pass-123")
-SHOTS = os.environ.get("E2E_SHOTS", tempfile.mkdtemp(prefix="handoff-webui-shots-")); os.makedirs(SHOTS, exist_ok=True)
-OUT = os.path.join(tempfile.gettempdir(), "handoff-webui-typed.txt")
+SHOTS = os.environ.get("E2E_SHOTS", tempfile.mkdtemp(prefix="takeover-webui-shots-")); os.makedirs(SHOTS, exist_ok=True)
+OUT = os.path.join(tempfile.gettempdir(), "takeover-webui-typed.txt")
 AGENT_DIR = os.path.expanduser("~/.hermes/hermes-agent")
 results = []
 
@@ -31,7 +31,7 @@ sys.path.insert(0, AGENT_DIR); os.environ["HERMES_HOME"] = HOME
 from tools.bot_desktop import lease as L, runtime as RT
 L.release()
 for stale in ("setup.json", "request.json"):                       # first-run state is "attempt once": start each run fresh
-    try: os.unlink(os.path.join(HOME, "handoff", stale))
+    try: os.unlink(os.path.join(HOME, "plugin-data", "takeover", stale))
     except OSError: pass
 if os.path.exists(OUT): os.remove(OUT)
 try: RT.stop()
@@ -52,11 +52,11 @@ def raw(url, method="GET", headers=None, data=None):
     except urllib.error.HTTPError as e:
         return e.code
 check("the sidecar refuses requests without WebUI's token (503 until WebUI mints it, then 401)", raw(f"http://127.0.0.1:{PORT}/api/status") in (401, 503))
-check("WebUI's proxy refuses an unauthenticated browser (401)", raw(f"{URL}/api/extensions/handoff/sidecar/api/status") == 401)
+check("WebUI's proxy refuses an unauthenticated browser (401)", raw(f"{URL}/api/extensions/takeover/sidecar/api/status") == 401)
 
 
 def js(P, expr): return P.eval(expr)
-def state_text(P): return P.eval("(document.querySelector('#mainHandoff [data-f=state]')||{}).textContent||''")
+def state_text(P): return P.eval("(document.querySelector('#mainTakeover [data-f=state]')||{}).textContent||''")
 def has(P, sel): return P.eval(f"!!document.querySelector({sel!r}) && !document.querySelector({sel!r}).hidden")
 def clk(P, sel): P.eval(f"document.querySelector({sel!r}).click()")
 
@@ -66,7 +66,7 @@ def page(chrome, path="/"):
     P.call("Network.enable")
     P.call("Network.setCookie", name=cname, value=cval, url=URL)
     P.call("Page.navigate", url=URL + path)
-    P.wait("!!window.__hermesHandoff", 40)
+    P.wait("!!window.__hermesTakeover", 40)
     return P
 
 
@@ -74,12 +74,12 @@ def run_tool(args, box):
     code = f"""
 import sys, os, importlib.util
 sys.path.insert(0, {AGENT_DIR!r}); os.environ['HERMES_HOME']={HOME!r}
-root = os.path.join({HOME!r}, 'plugins', 'handoff', 'handoff_core')
-spec = importlib.util.spec_from_file_location('hermes_handoff_core', os.path.join(root, '__init__.py'), submodule_search_locations=[root])
-m = importlib.util.module_from_spec(spec); sys.modules['hermes_handoff_core'] = m; spec.loader.exec_module(m)
+root = os.path.join({HOME!r}, 'plugins', 'takeover', 'takeover_core')
+spec = importlib.util.spec_from_file_location('hermes_takeover_core', os.path.join(root, '__init__.py'), submodule_search_locations=[root])
+m = importlib.util.module_from_spec(spec); sys.modules['hermes_takeover_core'] = m; spec.loader.exec_module(m)
 print(m.tool.handle({args!r}))
 """
-    env = dict(os.environ, HERMES_WEBUI_STATE_DIR=STATE, HANDOFF_PORT=PORT)       # never let the tool's auto-integration touch the real WebUI
+    env = dict(os.environ, HERMES_WEBUI_STATE_DIR=STATE, TAKEOVER_PORT=PORT)       # never let the tool's auto-integration touch the real WebUI
     p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=240, env=env)
     box.append(p.stdout.strip().splitlines()[-1] if p.stdout.strip() else "ERR " + p.stderr[-400:])
 
@@ -91,34 +91,34 @@ try:
     # start clean (from inside the page: WebUI's own script attaches the CSRF token): revoke consent left by a previous
     # run and skip WebUI's first-run wizard so it does not cover the page
     A.eval("""Promise.all([
-      fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'handoff',approved:false})}),
+      fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:false})}),
       fetch('/api/settings',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({onboarding_completed:true})})]).then(r=>r.map(x=>x.status))""", True)
     A.call("Page.reload"); time.sleep(1)
-    A.wait("!!window.__hermesHandoff && !!document.querySelector('.rail .hdo-rail')", 40)
+    A.wait("!!window.__hermesTakeover && !!document.querySelector('.rail .hdo-rail')", 40)
     check("extension loaded by WebUI: Screen rail + phone-nav entries", has(A, ".rail .hdo-rail") and has(A, ".sidebar-nav .hdo-nav"))
 
     # ── before consent ──
-    js(A, "window.__hermesHandoff.open()")
-    A.wait("document.querySelector('#mainHandoff [data-f=state]').textContent!=='Connecting…'", 20)
+    js(A, "window.__hermesTakeover.open()")
+    A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent!=='Connecting…'", 20)
     check("before approval the page explains the one-time step", "approval" in state_text(A).lower(), state_text(A))
     A.screenshot(f"{SHOTS}/1-needs-approval.png")
 
     # ── the one manual step: consent (what Settings -> Extensions -> Approve does) ──
-    r = A.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'handoff',approved:true})}).then(r=>r.status)", True)
+    r = A.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:true})}).then(r=>r.status)", True)
     check("approving the proxy succeeds (WebUI auth on, token-v1)", r == 200, r)
 
     check("after consent the sidecar refuses a wrong token (401)", raw(f"http://127.0.0.1:{PORT}/api/status", headers={"X-Hermes-Sidecar-Token": "nope"}) == 401)
-    A.wait("document.querySelector('#mainHandoff [data-f=state]').textContent==='Screen is off'", 30)
-    check("after approval: screen off on a fresh home, Start offered", has(A, "#mainHandoff [data-f=start]"))
+    A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent==='Screen is off'", 30)
+    check("after approval: screen off on a fresh home, Start offered", has(A, "#mainTakeover [data-f=start]"))
     A.screenshot(f"{SHOTS}/2-off.png")
 
-    clk(A, "#mainHandoff [data-f=start]")
-    A.wait("document.querySelector('#mainHandoff [data-f=state]').textContent==='Agent is driving'", 60)
+    clk(A, "#mainTakeover [data-f=start]")
+    A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent==='Agent is driving'", 60)
     check("Start screen from the page: Bot Desktop comes up", RT.is_running())
-    A.wait("window.__hermesHandoff.state().connected", 40)
+    A.wait("window.__hermesTakeover.state().connected", 40)
     check("live view connects over the proxied long-poll channel", True)
-    check("canvas renders the desktop", A.eval("(()=>{const c=document.querySelector('#mainHandoff canvas');return !!c&&c.width>100})()"))
-    check("Take over visible once connected", has(A, "#mainHandoff [data-f=take]"))
+    check("canvas renders the desktop", A.eval("(()=>{const c=document.querySelector('#mainTakeover canvas');return !!c&&c.width>100})()"))
+    check("Take over visible once connected", has(A, "#mainTakeover [data-f=take]"))
 
     env = dict(l.split("=", 1) for l in open(f"{HOME}/bot-desktop/env").read().splitlines() if "=" in l)
     term = subprocess.Popen(["xfce4-terminal", "--hide-menubar", "-e", f"sh -c 'cat > {OUT}'"], env={**os.environ, **env},
@@ -127,17 +127,17 @@ try:
     A.screenshot(f"{SHOTS}/3-watching.png")
 
     # watching: nothing the page sends may reach the desktop, even if the page is poked directly
-    A.eval("window.__hermesHandoff.state()")
+    A.eval("window.__hermesTakeover.state()")
     key = [4, 1, 0, 0, 0, 0, 0, 0x7a]            # KeyEvent 'z' down
-    A.eval(f"(async()=>{{const sid=[...performance.getEntriesByType('resource')].map(e=>e.name).filter(n=>n.includes('/api/rfb/recv')).pop().match(/sid=([^&]+)/)[1]; await fetch('/api/extensions/handoff/sidecar/api/rfb/send?sid='+sid,{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/octet-stream'}},body:new Uint8Array({key})}}); }})()", True)
+    A.eval(f"(async()=>{{const sid=[...performance.getEntriesByType('resource')].map(e=>e.name).filter(n=>n.includes('/api/rfb/recv')).pop().match(/sid=([^&]+)/)[1]; await fetch('/api/extensions/takeover/sidecar/api/rfb/send?sid='+sid,{{method:'POST',credentials:'same-origin',headers:{{'Content-Type':'application/octet-stream'}},body:new Uint8Array({key})}}); }})()", True)
     time.sleep(1)
     check("a forged key event from a watching page is dropped server-side", not os.path.exists(OUT) or "z" not in open(OUT, errors="replace").read())
 
     # ── the agent asks (tool in another process) ──
     box = []
     t = threading.Thread(target=run_tool, args=({"reason": "Enter the SMS code for the bank login", "wait_seconds": 150}, box)); t.start()
-    A.wait("!document.querySelector('#mainHandoff [data-f=ask]').hidden", 20)
-    check("the agent's request shows on the Screen page", "SMS code" in A.eval("document.querySelector('#mainHandoff [data-f=ask]').textContent"))
+    A.wait("!document.querySelector('#mainTakeover [data-f=ask]').hidden", 20)
+    check("the agent's request shows on the Screen page", "SMS code" in A.eval("document.querySelector('#mainTakeover [data-f=ask]').textContent"))
     A.screenshot(f"{SHOTS}/4-agent-asks.png")
 
     B = page(chrome)                              # another WebUI page (chat view): the global banner
@@ -146,8 +146,8 @@ try:
     B.screenshot(f"{SHOTS}/5-banner-on-chat.png")
     B.call("Page.close")
 
-    clk(A, "#mainHandoff [data-f=take]")
-    A.wait("window.__hermesHandoff.state().inputOn && !document.querySelector('#mainHandoff [data-f=tools]').hidden", 15)
+    clk(A, "#mainTakeover [data-f=take]")
+    A.wait("window.__hermesTakeover.state().inputOn && !document.querySelector('#mainTakeover [data-f=tools]').hidden", 15)
     check("take over: lease -> human, input on, tools shown", L.get().holder == "human")
     check("the agent's ask stays as the takeover reason", "SMS code" in L.get().reason, L.get().reason)
     try: L.assert_agent_may_act(); fenced = False
@@ -156,12 +156,12 @@ try:
     A.screenshot(f"{SHOTS}/6-driving.png")
 
     secret = "P@ss w0rd!#{}[]<>~`|\\\"'é"
-    A.eval("document.querySelector('#mainHandoff .hdo-type').open = true")
-    A.eval(f"(()=>{{const t=document.querySelector('#mainHandoff [data-f=typed]'); t.value={json.dumps(secret)}; document.querySelector('#mainHandoff [data-f=typedEnter]').checked=true; document.querySelector('#mainHandoff [data-f=typedSend]').click();}})()")
+    A.eval("document.querySelector('#mainTakeover .hdo-type').open = true")
+    A.eval(f"(()=>{{const t=document.querySelector('#mainTakeover [data-f=typed]'); t.value={json.dumps(secret)}; document.querySelector('#mainTakeover [data-f=typedEnter]').checked=true; document.querySelector('#mainTakeover [data-f=typedSend]').click();}})()")
     time.sleep(6)
     typed = open(OUT, encoding="utf-8", errors="replace").read() if os.path.exists(OUT) else ""
     check("Type text lands in the remote app (symbols, space, accent, Enter)", typed.strip("\n") == secret, repr(typed))
-    A.eval("""(()=>{const i=document.querySelector('#mainHandoff [data-f=kbdInput]'); i.focus();
+    A.eval("""(()=>{const i=document.querySelector('#mainTakeover [data-f=kbdInput]'); i.focus();
       for (const ch of 'abc') i.dispatchEvent(new InputEvent('beforeinput',{inputType:'insertText',data:ch,cancelable:true,bubbles:true}));
       i.dispatchEvent(new InputEvent('beforeinput',{inputType:'deleteContentBackward',cancelable:true,bubbles:true}));
       i.dispatchEvent(new InputEvent('beforeinput',{inputType:'insertLineBreak',cancelable:true,bubbles:true}));})()""")
@@ -171,14 +171,14 @@ try:
 
     # ── phone gestures, against a real headed Chromium running ON the remote desktop ──────────────────────────────
     import urllib.request as _u, base64, shutil
-    page_html = os.path.join(tempfile.gettempdir(), "handoff-touch.html")
+    page_html = os.path.join(tempfile.gettempdir(), "takeover-touch.html")
     open(page_html, "w").write("""<!doctype html><meta charset=utf-8><body style="margin:0;font:22px sans-serif">
 <button id=b style="position:fixed;left:40px;top:260px;width:200px;height:90px;font-size:26px" onclick="window.c=(window.c||0)+1;u()">click me</button>
 <p id=t style="position:fixed;left:30px;top:120px;width:600px">Select this sentence by holding and dragging across it, please.</p>
 <div style="height:30000px;background:linear-gradient(#fff,#ccd)"></div>
 <script>window.x=0;function u(){document.title='y='+Math.round(scrollY)+' c='+(window.c||0)+' x='+(window.x||0)}
 addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e.preventDefault()});u()</script>""")
-    tdir = tempfile.mkdtemp(prefix="handoff-touch-chrome-")
+    tdir = tempfile.mkdtemp(prefix="takeover-touch-chrome-")
     cenv = {**os.environ, **env}
     cbin = os.environ.get("E2E_CHROME") or shutil.which("chromium") or shutil.which("google-chrome") or \
         os.path.expanduser("~/.hermes/tools/chromium-1208/chrome-linux/chrome")
@@ -200,21 +200,21 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     A.call("Emulation.setTouchEmulationEnabled", enabled=True, maxTouchPoints=5)
     A.call("Emulation.setDeviceMetricsOverride", width=412, height=860, deviceScaleFactor=2, mobile=True)
     time.sleep(1.5)
-    A.wait("window.__hermesHandoff.view() && window.__hermesHandoff.view().fb[0] > 500", 20)
-    V = lambda: A.eval("window.__hermesHandoff.view()")
+    A.wait("window.__hermesTakeover.view() && window.__hermesTakeover.view().fb[0] > 500", 20)
+    V = lambda: A.eval("window.__hermesTakeover.view()")
     st0 = V()
     print(f"      phone view: scale {st0['s']} (fit {st0['fit']}), desktop {st0['fb']}")
     check("phone default zoom is more readable than fit-to-width", st0["s"] > st0["fit"] + 0.05 or st0["s"] >= 0.99, str(st0))
-    A.eval("document.querySelector('#mainHandoff .hdo-stage').scrollIntoView()")
+    A.eval("document.querySelector('#mainTakeover .hdo-stage').scrollIntoView()")
     nonlocal_stage = [None]
-    stage = A.eval("(()=>{const r=document.querySelector('#mainHandoff .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
+    stage = A.eval("(()=>{const r=document.querySelector('#mainTakeover .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
     print(f"      stage {stage[2]:.0f}x{stage[3]:.0f} css px of a {A.eval('innerHeight')} px tall phone screen")
     def srect():
-        A.eval("document.querySelector('#mainHandoff .hdo-stage').scrollIntoView({block:'center'})"); time.sleep(0.3)
-        return A.eval("(()=>{const r=document.querySelector('#mainHandoff .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
+        A.eval("document.querySelector('#mainTakeover .hdo-stage').scrollIntoView({block:'center'})"); time.sleep(0.3)
+        return A.eval("(()=>{const r=document.querySelector('#mainTakeover .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
     def to_client(rx, ry):
         nonlocal_stage[0] = stage = srect()
-        A.eval(f"window.__hermesHandoff.tv().reveal({rx}, {ry})"); time.sleep(0.2)       # bring the target into view first
+        A.eval(f"window.__hermesTakeover.tv().reveal({rx}, {ry})"); time.sleep(0.2)       # bring the target into view first
         v = V(); x, y = stage[0] + v["tx"] + rx * v["s"], stage[1] + v["ty"] + ry * v["s"]
         assert stage[0] < x < stage[0] + stage[2] and stage[1] < y < stage[1] + stage[3], ("target outside the stage", x, y, stage)
         return x, y
@@ -287,44 +287,44 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     except Exception: pass
     rc.terminate()
 
-    clk(A, "#mainHandoff [data-f=back]")
+    clk(A, "#mainTakeover [data-f=back]")
     t.join(60)
     out = json.loads(box[0]) if box and box[0].startswith("{") else {"status": str(box)}
     check("hand back: the waiting tool call returns 'completed' by itself", out.get("status") == "completed", str(out))
     check("lease is the agent's again", L.get().holder == "agent")
 
     # ── second device evicts the first ──
-    A.wait("!document.querySelector('#mainHandoff [data-f=take]').hidden", 15)
-    clk(A, "#mainHandoff [data-f=take]"); A.wait("window.__hermesHandoff.state().mine", 10)
-    C = page(chrome); js(C, "window.__hermesHandoff.open()")
-    C.wait("window.__hermesHandoff.state().connected", 40)
-    clk(C, "#mainHandoff [data-f=take]"); C.wait("window.__hermesHandoff.state().mine", 10)
-    A.wait("!window.__hermesHandoff.state().mine", 20)
-    check("second device takes over: the first drops to watching", not A.eval("window.__hermesHandoff.state().inputOn"))
+    A.wait("!document.querySelector('#mainTakeover [data-f=take]').hidden", 15)
+    clk(A, "#mainTakeover [data-f=take]"); A.wait("window.__hermesTakeover.state().mine", 10)
+    C = page(chrome); js(C, "window.__hermesTakeover.open()")
+    C.wait("window.__hermesTakeover.state().connected", 40)
+    clk(C, "#mainTakeover [data-f=take]"); C.wait("window.__hermesTakeover.state().mine", 10)
+    A.wait("!window.__hermesTakeover.state().mine", 20)
+    check("second device takes over: the first drops to watching", not A.eval("window.__hermesTakeover.state().inputOn"))
     before = open(OUT, encoding="utf-8", errors="replace").read()
     time.sleep(1)
-    check("evicted device cannot type", open(OUT, encoding="utf-8", errors="replace").read() == before and A.eval("document.querySelector('#mainHandoff [data-f=tools]').hidden"))
-    A.wait("window.__hermesHandoff.state().connected", 20)
-    check("evicted device reconnects as a watcher", not A.eval("window.__hermesHandoff.state().inputOn"))
+    check("evicted device cannot type", open(OUT, encoding="utf-8", errors="replace").read() == before and A.eval("document.querySelector('#mainTakeover [data-f=tools]').hidden"))
+    A.wait("window.__hermesTakeover.state().connected", 20)
+    check("evicted device reconnects as a watcher", not A.eval("window.__hermesTakeover.state().inputOn"))
     A.screenshot(f"{SHOTS}/8-evicted.png")
 
     # ── holder's tab closed mid-takeover ──
     C.call("Page.close"); time.sleep(3)
     check("holder's tab closed: agent stays locked out", L.get().holder == "human")
-    D = page(chrome); js(D, "window.__hermesHandoff.open()")
-    D.wait("document.querySelector('#mainHandoff [data-f=banner]') && /force hand-back/i.test(document.querySelector('#mainHandoff [data-f=banner]').textContent)", 30)
+    D = page(chrome); js(D, "window.__hermesTakeover.open()")
+    D.wait("document.querySelector('#mainTakeover [data-f=banner]') && /force hand-back/i.test(document.querySelector('#mainTakeover [data-f=banner]').textContent)", 30)
     check("reopened page offers Force hand-back", True)
-    D.eval("window.confirm=()=>true"); D.eval("document.querySelector('#mainHandoff [data-act=force]').click()")
+    D.eval("window.confirm=()=>true"); D.eval("document.querySelector('#mainTakeover [data-act=force]').click()")
     time.sleep(3)
     check("force hand-back: agent resumes", L.get().holder == "agent")
     D.screenshot(f"{SHOTS}/9-forced.png")
 
     # ── hiding the page stops the stream; no session leak on the sidecar ──
-    js(A, "window.__hermesHandoff.close()")
+    js(A, "window.__hermesTakeover.close()")
     time.sleep(8)
     cfg = open(os.path.join(HOME, "config.yaml")).read() if os.path.exists(os.path.join(HOME, "config.yaml")) else ""
     check("first run turned browser.headed on by itself", "headed: true" in cfg, cfg[:200])
-    check("leaving the Screen page stops streaming", not A.eval("window.__hermesHandoff.state().connected"))
+    check("leaving the Screen page stops streaming", not A.eval("window.__hermesTakeover.state().connected"))
 finally:
     chrome.close()
     if term: term.terminate()

@@ -1,4 +1,4 @@
-/* Handoff: the Screen tab. See the agent's browser live, take over, hand back.
+/* Takeover: the Screen tab. See the agent's browser live, take over, hand back.
    Plain IIFE against window.__HERMES_PLUGIN_SDK__ (no build step). noVNC 1.6.0 is bundled in ./novnc (no CDN). */
 (function () {
   "use strict";
@@ -9,11 +9,11 @@
   const h = React.createElement;
   const { useState, useEffect, useRef } = SDK.hooks;
 
-  const API = "/api/plugins/handoff";
+  const API = "/api/plugins/takeover";
   const BASE = (window.__HERMES_BASE_PATH__ || "").replace(/\/+$/, "");
   const SCRIPT = (document.currentScript && document.currentScript.src) || "";
-  const ASSETS = SCRIPT ? new URL(".", SCRIPT).href : BASE + "/dashboard-plugins/handoff/dist/";
-  const VIEWER_KEY = "hermes.handoff.viewer";          // sessionStorage: one viewer id per browser tab
+  const ASSETS = SCRIPT ? new URL(".", SCRIPT).href : BASE + "/dashboard-plugins/takeover/dist/";
+  const VIEWER_KEY = "hermes.takeover.viewer";          // sessionStorage: one viewer id per browser tab
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -125,7 +125,7 @@
     }
     wsUrl(j) {
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      return proto + "//" + location.host + BASE + (j.stream_path || "/api/plugins/handoff/stream").replace(BASE, "")
+      return proto + "//" + location.host + BASE + (j.stream_path || "/api/plugins/takeover/stream").replace(BASE, "")
         + "?ticket=" + encodeURIComponent(j.ticket);
     }
     async connect() {
@@ -155,7 +155,7 @@
         });
         rfb.addEventListener("disconnect", () => setTimeout(() => this.onClosed(gen), 0));
       } catch (e) {
-        console.warn("[handoff] connect failed", e);
+        console.warn("[takeover] connect failed", e);
         this.rfb = null; this.ws = null;
         this.set({ connecting: false });
         this.scheduleReconnect();
@@ -289,13 +289,13 @@
   // ── describe the current state in words ────────────────────────────────────────────────────────────────
   function describe(s) {
     if (s.err) {
-      if (s.err.error === "incompatible") return { dot: "err", text: "Hermes changed under Handoff", hint: s.err.message };
-      return { dot: "err", text: "Cannot reach the Handoff backend", hint: s.err.message || "Is the plugin enabled? hermes plugins enable handoff, then restart the dashboard." };
+      if (s.err.error === "incompatible") return { dot: "err", text: "Hermes changed under Takeover", hint: s.err.message };
+      return { dot: "err", text: "Cannot reach the Takeover backend", hint: s.err.message || "Is the plugin enabled? hermes plugins enable takeover, then restart the dashboard." };
     }
     const st = s.status;
     if (!st) return { dot: "wait", text: "Connecting…" };
     const r = st.readiness, setup = st.setup || {}, scr = st.screen || {}, lease = st.lease || {};
-    if (!r.supported) return { dot: "err", text: "Not supported on this host", hint: "Handoff needs a Linux host (Bot Desktop)." };
+    if (!r.supported) return { dot: "err", text: "Not supported on this host", hint: "Takeover needs a Linux host (Bot Desktop)." };
     if (!r.ready) {
       if (setup.state === "running") return { dot: "wait", text: "Setting up the screen… (first run)" };
       if (setup.state === "needs_manual") return { dot: "err", text: "One manual step needed", hint: setup.error, copy: setup.manual_command };
@@ -452,14 +452,14 @@
       loop();
       return () => { dead = true; clearTimeout(timer); };
     }, []);
-    if (!p || location.pathname.replace(BASE, "").indexOf("/handoff") === 0) return null;
+    if (!p || location.pathname.replace(BASE, "").indexOf("/takeover") === 0) return null;
     const req = p.request, mine = p.lease && p.lease.mine;
     if (!(req && req.status === "pending") && !mine) return null;
     return h("div", { className: "hdo-global" + (mine ? " hdo-global-me" : "") },
       mine ? "You still have control of the agent's screen. " : [h("b", { key: "b" }, "The agent needs you: "), req.reason + " "],
-      h("a", { href: BASE + "/handoff" }, mine ? "Open Screen to hand back" : "Open Screen"));
+      h("a", { href: BASE + "/takeover" }, mine ? "Open Screen to hand back" : "Open Screen"));
   }
 
-  reg.register("handoff", ScreenPage);
-  if (reg.registerSlot) reg.registerSlot("handoff", "header-banner", Banner);
+  reg.register("takeover", ScreenPage);
+  if (reg.registerSlot) reg.registerSlot("takeover", "header-banner", Banner);
 })();
