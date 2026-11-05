@@ -51,7 +51,7 @@ main.main.showing-x-handoff > #mainHandoff { display: flex; }
 .hdo-side { padding: 14px; font-size: 13px; line-height: 1.45; }
 .hdo-side-title { font-weight: 600; margin-bottom: 6px; }
 .hdo-side-body { color: var(--text2, var(--text)); }
-@media (max-width: 640px) { .hdo-wrap { padding: 6px; } .hdo-stage { min-height: 260px; } }
+@media (max-width: 640px) { .hdo-wrap { padding: 6px; } .hdo-stage { min-height: 46vh; } .hdo-more { margin-top: 4px; } }
 
 .hdo-ask { border: 1px solid var(--warning, #d29922); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
 .hdo-log { margin: 0; padding: 8px 10px; font: 12px/1.4 var(--font-mono, monospace); border: 1px solid var(--border); border-radius: 8px; max-height: 14em; overflow: auto; white-space: pre-wrap; }

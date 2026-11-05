@@ -153,10 +153,12 @@
       '<button type="button" class="hdo-key" data-f="kbd">⌨ Keyboard</button>' +
       '<button type="button" class="hdo-key" data-k="Escape">Esc</button><button type="button" class="hdo-key" data-k="Tab">Tab</button>' +
       '<button type="button" class="hdo-key" data-k="Enter" data-f="enter">Enter</button>' +
+      '<button type="button" class="hdo-key hdo-morebtn" data-f="more" aria-expanded="false">More ▾</button></div>' +
+      '<div class="hdo-more" data-f="moreBox" hidden><div class="hdo-row">' +
       '<button type="button" class="hdo-key" data-c="l">Ctrl+L</button><button type="button" class="hdo-key" data-c="a">Ctrl+A</button>' +
       '<button type="button" class="hdo-key" data-c="v">Ctrl+V</button>' +
-      '<button type="button" class="hdo-key" data-f="paste">Paste from phone</button>' +
-      '<button type="button" class="hdo-key" data-z="out" aria-label="Zoom out">−</button>' +
+      '<button type="button" class="hdo-key" data-f="paste">Paste from phone</button></div>' +
+      '<div class="hdo-row"><button type="button" class="hdo-key" data-z="out" aria-label="Zoom out">−</button>' +
       '<span class="hdo-zoom" data-f="zoomLabel">100%</span>' +
       '<button type="button" class="hdo-key" data-z="in" aria-label="Zoom in">+</button>' +
       '<button type="button" class="hdo-key" data-z="fit">Fit</button><button type="button" class="hdo-key" data-z="reset">Reset</button></div>' +
@@ -164,7 +166,7 @@
       '<textarea data-f="typed" rows="2" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste or type here, then Send. Sent as keystrokes; never stored."></textarea>' +
       '<div class="hdo-row"><label class="hdo-chk"><input type="checkbox" data-f="typedEnter"> press Enter after</label>' +
       '<button type="button" class="hdo-btn" data-f="typedSend">Send</button></div></details>' +
-      '<div class="hdo-hint">Drag = scroll · tap = click · hold, then drag = select/drag · pinch = zoom · two-finger tap = right click</div></div>' +
+      '<div class="hdo-hint">Drag = scroll · tap = click · hold, then drag = select/drag · pinch = zoom · two-finger tap = right click</div></div></div>' +
       '<input class="hdo-kbd-input" data-f="kbdInput" type="text" inputmode="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Keyboard input for the remote screen" tabindex="-1">' +
       '</div>';
   }
@@ -589,6 +591,10 @@
       const tv = S.tv; if (!tv) return;
       ({ in: () => tv.zoomIn(), out: () => tv.zoomOut(), fit: () => tv.fit(), reset: () => tv.comfort() })[b.dataset.z]();
     }));
+    F.more.addEventListener('click', () => {
+      const open = F.moreBox.hidden; F.moreBox.hidden = !open;
+      F.more.setAttribute('aria-expanded', open ? 'true' : 'false'); F.more.textContent = open ? 'Less ▴' : 'More ▾';
+    });
     F.paste.addEventListener('click', pasteFromPhone);
     $$('[data-k]', page).forEach((b) => b.addEventListener('click', () => press(KS[b.dataset.k])));
     $$('[data-c]', page).forEach((b) => b.addEventListener('click', () => combo(b.dataset.c)));

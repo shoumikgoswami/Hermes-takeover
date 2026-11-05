@@ -173,7 +173,7 @@ try:
     import urllib.request as _u, base64, shutil
     page_html = os.path.join(tempfile.gettempdir(), "handoff-touch.html")
     open(page_html, "w").write("""<!doctype html><meta charset=utf-8><body style="margin:0;font:22px sans-serif">
-<button id=b style="position:fixed;right:40px;top:120px;width:200px;height:90px;font-size:26px" onclick="window.c=(window.c||0)+1;u()">click me</button>
+<button id=b style="position:fixed;left:40px;top:260px;width:200px;height:90px;font-size:26px" onclick="window.c=(window.c||0)+1;u()">click me</button>
 <p id=t style="position:fixed;left:30px;top:120px;width:600px">Select this sentence by holding and dragging across it, please.</p>
 <div style="height:30000px;background:linear-gradient(#fff,#ccd)"></div>
 <script>window.x=0;function u(){document.title='y='+Math.round(scrollY)+' c='+(window.c||0)+' x='+(window.x||0)}
@@ -205,9 +205,14 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     st0 = V()
     print(f"      phone view: scale {st0['s']} (fit {st0['fit']}), desktop {st0['fb']}")
     check("phone default zoom is more readable than fit-to-width", st0["s"] > st0["fit"] + 0.05 or st0["s"] >= 0.99, str(st0))
+    A.eval("document.querySelector('#mainHandoff .hdo-stage').scrollIntoView()")
     stage = A.eval("(()=>{const r=document.querySelector('#mainHandoff .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
+    print(f"      stage {stage[2]:.0f}x{stage[3]:.0f} css px of a {A.eval('innerHeight')} px tall phone screen")
     def to_client(rx, ry):
-        v = V(); return stage[0] + v["tx"] + rx * v["s"], stage[1] + v["ty"] + ry * v["s"]
+        A.eval(f"window.__hermesHandoff.tv().reveal({rx}, {ry})"); time.sleep(0.2)       # bring the target into view first
+        v = V(); x, y = stage[0] + v["tx"] + rx * v["s"], stage[1] + v["ty"] + ry * v["s"]
+        assert stage[0] < x < stage[0] + stage[2] and stage[1] < y < stage[1] + stage[3], ("target outside the stage", x, y, stage)
+        return x, y
     def touch(kind, pts):
         A.call("Input.dispatchTouchEvent", type=kind, touchPoints=[{"x": x, "y": y, "id": i} for i, (x, y) in enumerate(pts)])
     def drag(x0, y0, x1, y1, steps=14, dt=0.016, hold=0.0):
@@ -237,6 +242,8 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
 
     # tap on the remote button
     bx, by, bw, bh, ox, oy = rect("#b")
+    R.eval("window.scrollTo(0,0)"); time.sleep(1)
+    bx, by, bw, bh, ox, oy = rect("#b")
     tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
     c0 = int(kv()["c"]); touch("touchStart", [(tx_, ty_)]); time.sleep(0.05); touch("touchEnd", []); time.sleep(1)
     check("a tap clicks exactly where the finger is (remote button pressed once)", int(kv()["c"]) == c0 + 1, title())
@@ -262,10 +269,6 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("pinch zooms the view in", z1 > z0 * 1.4, f"{z0} -> {z1}")
     R.eval("window.scrollTo(0,0)"); time.sleep(1)
     bx, by, bw, bh, ox, oy = rect("#b"); tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
-    inside = stage[0] <= tx_ <= stage[0] + stage[2] and stage[1] <= ty_ <= stage[1] + stage[3]
-    if not inside:      # pan the view so the button is visible, then tap
-        A.eval("window.__hermesHandoff.tv()._pan(%d, %d)" % (stage[0] + stage[2] / 2 - tx_, stage[1] + stage[3] / 2 - ty_)); time.sleep(0.3)
-        tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
     c0 = int(kv()["c"]); touch("touchStart", [(tx_, ty_)]); time.sleep(0.05); touch("touchEnd", []); time.sleep(1)
     check("taps stay accurate after zooming and panning", int(kv()["c"]) == c0 + 1, title())
     A.screenshot(f"{SHOTS}/9-zoomed.png")

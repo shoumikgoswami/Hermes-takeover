@@ -18,7 +18,7 @@
 const BTN = { LEFT: 1, MID: 2, RIGHT: 4, UP: 8, DOWN: 16 };
 const TAP_MS = 350, LONG_MS = 450, MOVE_PX = 10;
 
-export const NOTCH_PX = 53;              // remote pixels the page scrolls per wheel notch (calibrated against Chrome on Xvnc)
+export const NOTCH_PX = 96;              // remote pixels one wheel notch scrolls in Chrome on Linux (measured end to end: 5 notches = 480 px)
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -95,6 +95,8 @@ export class TouchView {
     this.s = ns; this.tx = cx - px * ns; this.ty = cy - py * ns;
     this._apply();
   }
+  /** Pan (without zooming) so the remote point (rx, ry) is at the centre of the stage. */
+  reveal(rx, ry) { const z = this._sz(); this.tx = z.w / 2 - rx * this.s; this.ty = z.h / 2 - ry * this.s; this._apply(); }
   zoomIn() { this.zoomBy(1.4); }
   zoomOut() { this.zoomBy(1 / 1.4); }
   state() { return { s: +this.s.toFixed(3), tx: Math.round(this.tx), ty: Math.round(this.ty), fb: [this.fbW, this.fbH], fit: +this.fitScale().toFixed(3) }; }
