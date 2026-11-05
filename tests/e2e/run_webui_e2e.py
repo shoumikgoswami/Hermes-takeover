@@ -269,6 +269,7 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
 
     # pinch zoom changes the view, and taps stay accurate afterwards
     cx, cy = centre(); z0 = V()["s"]; A.eval("window.__hdoT=[]")
+    print("      pinch at", round(cx), round(cy), "element:", A.eval(f"(()=>{{const e=document.elementFromPoint({cx},{cy}); return e.tagName+'.'+e.className+' | '+(e.closest('[id]')||{{}}).id}})()"), "stage", srect())
     touch("touchStart", [(cx - 40, cy), (cx + 40, cy)])
     for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
     touch("touchEnd", []); time.sleep(0.4)
