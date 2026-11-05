@@ -171,7 +171,20 @@
       '</div>';
   }
 
+  // hermes-webui opens its mobile drawer on any horizontal drag that starts within 80 px of the screen's left edge, which is
+  // exactly where a finger lands when it pans or selects on the remote screen. WebUI exempts "interactive" targets through
+  // this global; add the stage to them. Fails safe: if WebUI changes it, we just stop overriding.
+  function guardEdgeSwipe() {
+    try {
+      const orig = window._isInteractiveSwipeTarget;
+      if (typeof orig !== 'function' || orig.__hdo) return;
+      const wrapped = (t) => { try { if (t && t.closest && t.closest('.hdo-stage')) return true; } catch (_) { /* detached */ } return orig(t); };
+      wrapped.__hdo = true; window._isInteractiveSwipeTarget = wrapped;
+    } catch (_) { /* non-writable: leave WebUI alone */ }
+  }
+
   function mount() {
+    guardEdgeSwipe();
     const main = $('main.main'); const rail = $('.rail');
     if (!main) return false;
     page = document.getElementById('mainHandoff');

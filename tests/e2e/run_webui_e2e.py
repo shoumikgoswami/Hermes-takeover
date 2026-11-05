@@ -266,14 +266,15 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     drag(a[0], a[1], b[0], b[1], steps=10, dt=0.03, hold=0.65); time.sleep(1)
     sel = R.eval("getSelection().toString()")
     check("hold-then-drag selects text on the remote page", len(sel) > 10, repr(sel))
+    check("a drag that starts at the screen edge does not pop open WebUI's sidebar drawer",
+          not A.eval("!!document.querySelector('.sidebar.mobile-open')"))
 
     # pinch zoom changes the view, and taps stay accurate afterwards
-    cx, cy = centre(); z0 = V()["s"]; A.eval("window.__hdoT=[]")
-    print("      pinch at", round(cx), round(cy), "element:", A.eval(f"(()=>{{const e=document.elementFromPoint({cx},{cy}); return e.tagName+'.'+e.className+' | '+(e.closest('[id]')||{{}}).id}})()"), "stage", srect())
+    cx, cy = centre(); z0 = V()["s"]; pass
     touch("touchStart", [(cx - 40, cy), (cx + 40, cy)])
     for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
     touch("touchEnd", []); time.sleep(0.4)
-    z1 = V()["s"]; print("      trace:", A.eval("window.__hdoT.join(' ')")[:600])
+    z1 = V()["s"]
     check("pinch zooms the view in", z1 > z0 * 1.4, f"{z0} -> {z1}")
     R.eval("window.scrollTo(0,0)"); time.sleep(1)
     bx, by, bw, bh, ox, oy = rect("#b"); tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
