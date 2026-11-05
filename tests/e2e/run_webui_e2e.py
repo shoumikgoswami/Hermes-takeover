@@ -354,6 +354,17 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("...and handing back completes that request", out2.get("status") == "completed", str(out2))
     E.call("Page.close")
 
+    # ── the side panel: explainer, live status, feedback address ──
+    F2 = page(chrome)
+    F2.wait("!!document.querySelector('#panelXTakeover [data-s=status]') && !/Checking/.test(document.querySelector('#panelXTakeover [data-s=status]').textContent)", 30)
+    side_txt = F2.eval("document.querySelector('#panelXTakeover').textContent")
+    check("side panel explains it and shows live status", "How it works" in side_txt and "The agent is driving" in side_txt, side_txt[:160])
+    check("side panel has the feedback address", F2.eval("document.querySelector('#panelXTakeover a[href^=\"mailto:hello@shoumikgoswami.com\"]') !== null"))
+    F2.eval("document.querySelectorAll('.panel-view').forEach(v=>v.classList.remove('active')); document.querySelector('#panelXTakeover').classList.add('active'); document.querySelector('#panelXTakeover').hidden=false")
+    F2.eval("(()=>{const sb=document.querySelector('.sidebar'); if (sb) {sb.classList.remove('sidebar-collapsed'); sb.classList.add('mobile-open');}})()")
+    time.sleep(0.6); F2.screenshot(f"{SHOTS}/12-side-panel.png")
+    F2.call("Page.close")
+
     # ── hiding the page stops the stream; no session leak on the sidecar ──
     js(A, "window.__hermesTakeover.close()")
     time.sleep(8)

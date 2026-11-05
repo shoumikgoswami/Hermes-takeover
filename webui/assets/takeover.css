@@ -48,9 +48,28 @@ main.main.showing-x-takeover > #mainTakeover { display: flex; }
 
 .hdo-rail.hdo-held, .hdo-nav.hdo-held { position: relative; }
 .hdo-rail.hdo-held::after, .hdo-nav.hdo-held::after { content: ""; position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--success, #3fb950); }
-.hdo-side { padding: 14px; font-size: 13px; line-height: 1.45; }
-.hdo-side-title { font-weight: 600; margin-bottom: 6px; }
-.hdo-side-body { color: var(--text2, var(--text)); }
+.hdo-side { padding: 14px; font-size: 13px; line-height: 1.5; overflow-y: auto; height: 100%; box-sizing: border-box; }
+.hdo-side-title { font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+.hdo-side-lead { color: var(--text2, var(--text)); margin-bottom: 12px; }
+.hdo-side-card { border: 1px solid var(--border, rgba(127,127,127,.3)); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+.hdo-side-card.hdo-side-ask { border-color: #d29922; background: rgba(210,153,34,.10); }
+.hdo-side-status { font-weight: 600; }
+.hdo-side-reason { margin-top: 4px; }
+.hdo-side-btns { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+.hdo-side-btns .hdo-global-take { margin-left: 0; }
+.hdo-side-open { background: none; border: 1px solid var(--border, rgba(127,127,127,.4)); color: inherit; border-radius: 999px;
+  padding: 4px 12px; cursor: pointer; font-size: 13px; }
+.hdo-side-h { font-weight: 600; margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .75; }
+.hdo-side-steps, .hdo-side-notes { margin: 0; padding-left: 18px; }
+.hdo-side-steps li, .hdo-side-notes li { margin: 3px 0; color: var(--text2, var(--text)); }
+.hdo-side-steps b { color: var(--text, inherit); }
+.hdo-side-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.hdo-side-tags span { border: 1px solid var(--border, rgba(127,127,127,.35)); border-radius: 999px; padding: 2px 9px; font-size: 12px; }
+.hdo-side-notes code { font-size: 12px; }
+.hdo-side-foot { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--border, rgba(127,127,127,.25)); font-size: 12px;
+  color: var(--text2, var(--text)); }
+.hdo-side-foot a { color: var(--accent, #58a6ff); }
+.hdo-side-ver { opacity: .6; margin-top: 2px; }
 @media (max-width: 640px) { .hdo-wrap { padding: 6px; } .hdo-stage { min-height: 46vh; } .hdo-more { margin-top: 4px; } }
 
 .hdo-ask { border: 1px solid var(--warning, #d29922); border-radius: 8px; padding: 8px 10px; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }

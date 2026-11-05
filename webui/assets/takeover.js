@@ -201,8 +201,12 @@
     if (!side && sideHost) {
       side = document.createElement('div');
       side.className = 'panel-view hdo-sidepanel'; side.id = 'panelXTakeover'; side.dataset.panelToken = 'takeover';
-      side.innerHTML = '<div class="hdo-side"><div class="hdo-side-title">Screen</div><div class="hdo-side-body">See and take over the agent\'s browser: logins, 2FA, CAPTCHAs, payments.</div></div>';
+      side.innerHTML = SIDE_HTML;
       sideHost.parentNode.appendChild(side);
+      const st = side.querySelector('[data-s=take]');
+      if (st) st.addEventListener('click', () => takeOverFromAnywhere());
+      const so = side.querySelector('[data-s=open]');
+      if (so) so.addEventListener('click', () => onNavClick(true));
     }
     if (rail && !rail.querySelector('[data-panel="' + PANEL + '"]')) {
       const btn = document.createElement('button');
@@ -222,6 +226,48 @@
     }
     bindPage();
     return true;
+  }
+
+  // ── side panel: what this is, how it works, live status, feedback ─────────
+  const FEEDBACK = 'hello@shoumikgoswami.com';
+  const SIDE_HTML =
+    '<div class="hdo-side">' +
+    '<div class="hdo-side-title">Takeover</div>' +
+    '<div class="hdo-side-lead">When your agent hits a step only you should do, it asks you here. One tap and you are driving its browser.</div>' +
+    '<div class="hdo-side-card" data-s="card"><div class="hdo-side-status" data-s="status">Checking…</div>' +
+    '<div class="hdo-side-reason" data-s="reason" hidden></div>' +
+    '<div class="hdo-side-btns"><button type="button" class="hdo-global-take" data-s="take" hidden>Take over</button>' +
+    '<button type="button" class="hdo-side-open" data-s="open">Open Screen</button></div></div>' +
+    '<div class="hdo-side-h">How it works</div>' +
+    '<ol class="hdo-side-steps">' +
+    '<li><b>The agent asks.</b> For example "Sign in to GitHub and approve the Hermes app". A banner shows on every page.</li>' +
+    '<li><b>Tap Take over.</b> You see its Chrome live and control it. On a phone: drag to scroll, pinch to zoom, tap to click.</li>' +
+    '<li><b>Do the step, tap Hand back.</b> The agent carries on by itself, signed in.</li></ol>' +
+    '<div class="hdo-side-h">It asks for</div>' +
+    '<div class="hdo-side-tags"><span>Sign-ins and passwords</span><span>Approve / authorize</span><span>2FA codes</span>' +
+    '<span>CAPTCHAs</span><span>Payments</span></div>' +
+    '<div class="hdo-side-h">Good to know</div>' +
+    '<ul class="hdo-side-notes"><li>While you drive, the agent\'s browser tools are paused.</li>' +
+    '<li>You type passwords straight into the browser, never into chat.</li>' +
+    '<li>Left without handing back? Use Force hand-back on the Screen page, or <code>/takeover release</code>.</li></ul>' +
+    '<div class="hdo-side-foot">Feedback or ideas? <a href="mailto:' + FEEDBACK + '?subject=Takeover%20plugin%20feedback">' + FEEDBACK + '</a>' +
+    '<div class="hdo-side-ver">Takeover 0.3.0</div></div>' +
+    '</div>';
+
+  function renderSide(p) {
+    if (!side || !p) return;
+    const q = (k) => side.querySelector('[data-s=' + k + ']');
+    const req = p.request; const lease = p.lease || {};
+    const pending = !!(req && req.status === 'pending');
+    let text;
+    if (lease.mine) text = 'You have control. Hand back on the Screen page when you are done.';
+    else if (lease.holder === 'human') text = 'Someone else has control of the screen.';
+    else if (pending) text = 'The agent needs you:';
+    else text = 'Nothing to do. The agent is driving.';
+    q('status').textContent = text;
+    q('reason').textContent = pending ? req.reason : ''; q('reason').hidden = !pending;
+    q('take').hidden = !(pending && !lease.mine);
+    q('card').classList.toggle('hdo-side-ask', pending && !lease.mine);
   }
 
   // ── navigation (same pattern as core rail pages) ──────────────────────────
@@ -637,6 +683,7 @@
       const r = await api('/api/pulse', { viewer_id: S.viewer }, { timeout: 6000 });
       if (r.ok && r.lease) {
         G.delay = 5000;
+        renderSide(r);
         const req = r.request; const mine = !!r.lease.mine;
         const show = !S.active && ((req && req.status === 'pending') || mine);
         if (show) {
@@ -667,6 +714,10 @@
       } else {
         G.delay = 60000;                   // not approved yet / sidecar down: stay quiet and cheap
         if (G.el) G.el.hidden = true;
+        if (side) {
+          const st = side.querySelector('[data-s=status]');
+          if (st) st.textContent = 'Not connected yet. Open Screen for setup steps.';
+        }
       }
     }
     setTimeout(globalTick, G.delay);
