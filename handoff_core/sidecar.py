@@ -140,6 +140,7 @@ class Session:
 
     def write(self, data: bytes) -> None:
         out = self.filter.feed(data)           # ValueError on unframeable bytes
+        log.debug("viewer %s: send in=%d forwarded=%d input_allowed=%s", self.short, len(data), len(out), self.allow_input())
         if not out:
             return
         with self.send_lock:
@@ -417,7 +418,7 @@ def serve(port: int = DEFAULT_PORT) -> Server:
 
 
 def main() -> int:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    logging.basicConfig(level=getattr(logging, os.environ.get("HANDOFF_LOG", "INFO").upper(), logging.INFO), format="%(asctime)s %(name)s %(message)s")
     port = int(os.environ.get("HANDOFF_PORT") or DEFAULT_PORT)
     try:
         srv = serve(port)
