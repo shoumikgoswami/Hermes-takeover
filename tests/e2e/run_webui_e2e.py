@@ -365,6 +365,25 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     time.sleep(0.6); F2.screenshot(f"{SHOTS}/12-side-panel.png")
     F2.call("Page.close")
 
+    # ── Settings -> Plugins: Takeover is listed (WebUI's own Hermes home) and opens the real Screen page ──
+    G = page(chrome)
+    G.eval("switchPanel('settings')"); time.sleep(1.5); G.eval("switchSettingsSection('plugins')")
+    G.wait("document.querySelectorAll('.plugin-card[data-plugin=\"takeover\"]').length > 0", 30)
+    cards = G.eval("[...document.querySelectorAll('.plugin-card[data-plugin=\"takeover\"]')].map(c=>c.textContent.replace(/\\s+/g,' ').slice(0,160))")
+    check("Settings -> Plugins lists Takeover", len(cards) >= 1, str(cards))
+    G.wait("!!document.querySelector('.plugin-card[data-plugin=\"takeover\"] [data-hdo-open]')", 15)
+    G.screenshot(f"{SHOTS}/13-plugins-tab.png")
+    G.eval("document.querySelector('.plugin-card[data-plugin=\"takeover\"] [data-hdo-open]').click()")
+    G.wait("window.__hermesTakeover.state().active", 20)
+    check("its Open Screen button opens the live Screen page", G.eval("window.__hermesTakeover.state().active"))
+    # the dashboard tab copy (sandboxed iframe, no backend) hands off to the real page instead of rendering blank
+    G.eval("fetch('/api/settings',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({dashboard_plugins:{takeover:true}})})")
+    time.sleep(1); js(G, "window.__hermesTakeover.close()"); time.sleep(1)
+    G.eval("switchPluginPage(null, '/takeover', 'Screen')")
+    G.wait("window.__hermesTakeover.state().active", 20)
+    check("the sandboxed dashboard-tab copy hands off to the live Screen page", G.eval("window.__hermesTakeover.state().active"))
+    G.call("Page.close")
+
     # ── hiding the page stops the stream; no session leak on the sidecar ──
     js(A, "window.__hermesTakeover.close()")
     time.sleep(8)

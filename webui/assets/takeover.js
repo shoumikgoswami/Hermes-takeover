@@ -731,6 +731,42 @@
     if (S.connected && !S.mine) { S.autoTake = 0; takeOver(); }
   }
 
+  // ── Settings -> Plugins integration ───────────────────────────────────────
+  // WebUI lists Takeover there twice when it is installed in WebUI's own Hermes home: the Hermes plugin (tool, hooks)
+  // and its dashboard tab, which WebUI can only show in a sandboxed iframe without a backend. Point both at the real
+  // Screen page this extension provides.
+  function decoratePluginCards() {
+    document.querySelectorAll('.plugin-card[data-plugin="takeover"]').forEach((card) => {
+      if (card.querySelector('[data-hdo-open]')) return;
+      const body = card.querySelector('.plugin-card-body') || card;
+      const row = document.createElement('div'); row.className = 'plugin-card-footer hdo-plugin-row';
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'plugin-open-btn'; b.dataset.hdoOpen = '1';
+      b.textContent = 'Open Screen';
+      b.addEventListener('click', (e) => { e.preventDefault(); onNavClick(true); });
+      const note = document.createElement('span'); note.className = 'hdo-plugin-note';
+      note.textContent = 'Live view + one-tap Take over (served by the Takeover extension).';
+      row.appendChild(b); row.appendChild(note); body.appendChild(row);
+    });
+  }
+  function watchPluginsPanel() {
+    decoratePluginCards();
+    try { new MutationObserver(() => decoratePluginCards()).observe(document.body, { childList: true, subtree: true }); }
+    catch (_) { /* old browser: the button is just missing */ }
+    // WebUI's own open button for the dashboard tab would load the sandboxed copy: open the real page instead
+    document.addEventListener('click', (e) => {
+      const a = e.target && e.target.closest && e.target.closest('.plugin-card[data-plugin="takeover"] a.plugin-open-btn');
+      if (!a) return;
+      e.preventDefault(); e.stopImmediatePropagation(); onNavClick(true);
+    }, true);
+    // ...and if that page is opened anyway (it asks us via postMessage), switch to the real Screen page
+    window.addEventListener('message', (e) => {
+      if (!e.data || e.data.type !== 'hermes-takeover:open') return;
+      const frames = document.querySelectorAll('#pluginPageContainer iframe');
+      if (![...frames].some((f) => f.contentWindow === e.source)) return;      // only WebUI's own plugin-page iframe
+      onNavClick(true);
+    });
+  }
+
   // ── boot ──────────────────────────────────────────────────────────────────
   document.addEventListener('visibilitychange', () => { if (S.active && !document.hidden) schedule(0); });
   window.addEventListener('pagehide', () => { try { if (S.chan) S.chan.close(); } catch (_) { /* ignore */ } });
@@ -738,7 +774,7 @@
   function install(attempt) {
     attempt = attempt || 0;
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
-      mount(); wrapCore();
+      mount(); wrapCore(); watchPluginsPanel();
       window.__hermesTakeover = {
         version: '0.3.0', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,

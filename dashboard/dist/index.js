@@ -4,7 +4,24 @@
   "use strict";
   const SDK = window.__HERMES_PLUGIN_SDK__;
   const reg = window.__HERMES_PLUGINS__;
-  if (!SDK || !reg) return;
+  if (!SDK || !reg) {
+    // hermes-webui lists dashboard plugins under Settings -> Plugins and opens them in a sandboxed iframe with no SDK and
+    // no backend. The live Screen cannot run there; WebUI gets it from Takeover's own WebUI extension instead. Ask the
+    // parent page (where that extension runs) to open it, and say so in case the extension is not installed/approved.
+    const host = document.getElementById("pluginPageContainer");
+    if (host) {
+      const open = () => { try { window.parent.postMessage({ type: "hermes-takeover:open" }, "*"); } catch (_) { /* no parent */ } };
+      host.innerHTML = '<div style="font:14px/1.5 system-ui,sans-serif;padding:24px;max-width:520px;color:#ccc">' +
+        '<h2 style="margin:0 0 8px;font-size:18px;color:#eee">Takeover</h2>' +
+        '<p>Opening the Screen page… In hermes-webui the live screen is the <b>Screen</b> icon in the side rail.</p>' +
+        '<p>If nothing happens, approve the Takeover service once: Settings → Extensions → Diagnostics → Loopback sidecars → ' +
+        '<b>Takeover</b> → Approve proxy, then reload.</p>' +
+        '<button type="button" style="padding:6px 14px;border-radius:999px;border:0;background:#1f6feb;color:#fff;font-weight:600">Open Screen</button></div>';
+      host.querySelector("button").addEventListener("click", open);
+      open();
+    }
+    return;
+  }
   const React = SDK.React;
   const h = React.createElement;
   const { useState, useEffect, useRef } = SDK.hooks;

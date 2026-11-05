@@ -90,3 +90,7 @@ main.main.showing-x-takeover > #mainTakeover { display: flex; }
 .hdo-global-take { margin-left: 6px; padding: 5px 14px; border-radius: 999px; border: 0; font-weight: 700; cursor: pointer;
   background: #1f6feb; color: #fff; font-size: 14px; }
 .hdo-global-take:active { transform: scale(.97); }
+
+.hdo-plugin-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hdo-plugin-row .plugin-open-btn { cursor: pointer; }
+.hdo-plugin-note { font-size: 12px; opacity: .75; }
