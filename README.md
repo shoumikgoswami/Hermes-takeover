@@ -12,7 +12,7 @@ One native Hermes plugin. No tunnel, no reverse proxy, no extra port to open, no
 ## Install
 
 ```bash
-hermes plugins install <owner>/hermes-handoff --enable      # or any git URL
+hermes plugins install shoumikgoswami/Hermes-handoff --enable
 ```
 
 Then just use Hermes. The first agent session wires everything up (below). Remove with `hermes plugins remove handoff`.
