@@ -255,7 +255,13 @@
       this.rfb.sendKey(c, null, true); this.rfb.sendKey(c, null, false);
       this.rfb.sendKey(KS.Control, "ControlLeft", false);
     }
+    async waitForInput(ms) {            // input unlocks ~350 ms after take-over (the server re-reads the lease)
+      const end = Date.now() + ms;
+      while (!this.s.inputOn && this.s.mine && Date.now() < end) await sleep(50);
+      return this.s.inputOn;
+    }
     async typeText(text, enterAfter) {
+      await this.waitForInput(3000);
       let skipLF = false;
       for (const ch of text) {
         if (!this.s.inputOn) { this.set({ note: "Typing stopped: you no longer have control." }); return; }
@@ -407,7 +413,7 @@
       h("div", { className: "hdo-stage" },
         h("div", { className: "hdo-screen", ref: screenRef, "data-testid": "screen" }),
         empty ? h("div", { className: "hdo-empty" }, empty) : null),
-      running && s.mine && s.connected ? h("div", { className: "hdo-tools", "data-testid": "tools" },
+      running && s.mine && s.connected && s.inputOn ? h("div", { className: "hdo-tools", "data-testid": "tools" },
         h("div", { className: "hdo-row" },
           keyBtn("⌨ Keyboard", () => { kbdRef.current.value = ""; kbdRef.current.focus(); }, { "data-testid": "kbd" }),
           keyBtn("Esc", () => ctl.press(KS.Escape)), keyBtn("Tab", () => ctl.press(KS.Tab)),

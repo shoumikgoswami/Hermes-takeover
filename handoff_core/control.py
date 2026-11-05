@@ -21,14 +21,16 @@ def screen(home) -> Dict[str, Any]:
     with compat.home_scope(home):
         try:
             d = rt.status()
-            d = asdict(d) if is_dataclass(d) else dict(d)
         except Exception as exc:  # noqa: BLE001
             return {"running": False, "error": f"{type(exc).__name__}: {exc}"}
+    if is_dataclass(d) and not isinstance(d, type):
+        d = asdict(d)
+    get = (lambda k: d.get(k)) if isinstance(d, dict) else (lambda k: getattr(d, k, None))
     with _start_lock:
         st = dict(_start.get(str(home)) or {})
-    running = bool(d.get("running"))
-    return {"running": running, "geometry": d.get("geometry"), "blocker": d.get("blocker"),
-            "placement": d.get("placement"), "starting": st.get("state") == "starting" and not running,
+    running = bool(get("running"))
+    return {"running": running, "geometry": get("geometry"), "blocker": get("blocker"),
+            "placement": get("placement"), "starting": st.get("state") == "starting" and not running,
             "start_error": st.get("error") if st.get("state") == "error" else None}
 
 
