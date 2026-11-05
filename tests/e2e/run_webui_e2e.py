@@ -82,6 +82,13 @@ chrome = Chrome(9334)
 term = None
 try:
     A = page(chrome)
+    # start clean (from inside the page: WebUI's own script attaches the CSRF token): revoke consent left by a previous
+    # run and skip WebUI's first-run wizard so it does not cover the page
+    A.eval("""Promise.all([
+      fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'handoff',approved:false})}),
+      fetch('/api/settings',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({onboarding_completed:true})})]).then(r=>r.map(x=>x.status))""", True)
+    A.call("Page.reload"); time.sleep(1)
+    A.wait("!!window.__hermesHandoff && !!document.querySelector('.rail .hdo-rail')", 40)
     check("extension loaded by WebUI: Screen rail + phone-nav entries", has(A, ".rail .hdo-rail") and has(A, ".sidebar-nav .hdo-nav"))
 
     # ── before consent ──
@@ -191,6 +198,8 @@ try:
     # ── hiding the page stops the stream; no session leak on the sidecar ──
     js(A, "window.__hermesHandoff.close()")
     time.sleep(8)
+    cfg = open(os.path.join(HOME, "config.yaml")).read() if os.path.exists(os.path.join(HOME, "config.yaml")) else ""
+    check("first run turned browser.headed on by itself", "headed: true" in cfg, cfg[:200])
     check("leaving the Screen page stops streaming", not A.eval("window.__hermesHandoff.state().connected"))
 finally:
     chrome.close()

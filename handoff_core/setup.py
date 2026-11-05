@@ -217,7 +217,8 @@ def maybe_auto_setup(home) -> Dict[str, Any]:
     (whatever its outcome) only an explicit request runs it again."""
     r = readiness(home)
     s = setup_state(home)
-    if (not r["ready"] and r["supported"] and s["auto_allowed"] and not s["attempted"]
+    needs = (not r["ready"]) or r["headed"] is False       # packages missing, or the agent's Chrome would be headless
+    if (needs and r["supported"] and s["auto_allowed"] and not s["attempted"]
             and s["state"] not in ("running",)):
         start_async(home)
         s = setup_state(home)

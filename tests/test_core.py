@@ -520,6 +520,21 @@ class TestSetup(unittest.TestCase):
         time.sleep(1.0)
         self.assertEqual(len(calls), 2)
 
+    def test_packages_fine_but_headless_browser_is_fixed_automatically_once(self):
+        self.missing, self.tiger = [], True
+        calls = self.installer(0)
+        core.setup.maybe_auto_setup(self.home)
+        for _ in range(60):
+            if core.setup.setup_state(self.home)["state"] == "done":
+                break
+            time.sleep(0.1)
+        self.assertEqual(self.config_sets, [("browser.headed", "true")])
+        self.assertEqual(calls, [])                          # nothing to install
+        n = len(self.config_sets)
+        core.setup.maybe_auto_setup(self.home)
+        time.sleep(0.4)
+        self.assertEqual(len(self.config_sets), n)           # once
+
     def test_auto_install_can_be_turned_off(self):
         calls = self.installer(0)
         self.auto = False

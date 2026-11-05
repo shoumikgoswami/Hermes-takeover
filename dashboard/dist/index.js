@@ -83,7 +83,7 @@
         this.s.status = r; this.s.err = null;
         const st = r.setup || {};
         // First run: ask the backend to set things up once (it applies the auto_install policy itself).
-        if (!r.readiness.ready && r.readiness.supported && !this.autoSetupAsked && st.state !== "running" && !st.attempted) {
+        if ((!r.readiness.ready || r.readiness.headed === false) && r.readiness.supported && !this.autoSetupAsked && st.state !== "running" && !st.attempted) {
           this.autoSetupAsked = true;
           call("/setup", { auto: true });
         }

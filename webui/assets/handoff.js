@@ -297,7 +297,7 @@
     if (r.ok && r.readiness) {
       S.status = r; S.err = null;
       const st = r.setup || {};
-      if (!r.readiness.ready && r.readiness.supported && !S.autoSetupAsked && st.state !== 'running' && !st.attempted) {
+      if ((!r.readiness.ready || r.readiness.headed === false) && r.readiness.supported && !S.autoSetupAsked && st.state !== 'running' && !st.attempted) {
         S.autoSetupAsked = true; api('/api/setup', { auto: true });
       }
     } else {
@@ -619,6 +619,10 @@
           a.textContent = mine ? 'Open Screen to hand back' : 'Open Screen';
           a.addEventListener('click', () => onNavClick(true));
           G.el.appendChild(msg); G.el.appendChild(a); G.el.hidden = false;
+          // sit just below WebUI's titlebar so the menu / title stay usable
+          const bar = document.querySelector('.app-titlebar') || (document.getElementById('appTitlebarTitle') || {}).parentElement;
+          const bottom = bar && bar.getBoundingClientRect ? bar.getBoundingClientRect().bottom : 0;
+          G.el.style.top = Math.max(0, Math.round(bottom) + 6) + 'px';
         } else if (G.el) G.el.hidden = true;
       } else {
         G.delay = 60000;                   // not approved yet / sidecar down: stay quiet and cheap
