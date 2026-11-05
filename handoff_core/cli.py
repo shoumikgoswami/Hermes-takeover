@@ -62,7 +62,7 @@ def run(args) -> int:
         print(f"  control:  {ls['holder']}" + (f" ({ls['reason']})" if ls.get("reason") else ""))
         print(f"  request:  {rq['reason'] + ' [' + rq['status'] + ']' if rq else '-'}")
         w = st["webui"]
-        print("  webui:    " + (f"extension {w['extension'] or 'not installed'}, service {'up' if w['sidecar'] else 'down'}" if w["detected"] else "not detected"))
+        print("  webui:    " + (("switched off (webui_integration: false)" if not w.get("enabled", True) else f"extension {w['extension'] or 'not installed'}, service {'up' if w['sidecar'] else 'down'}" + ("" if w.get("serves_this_profile", True) else "  (serving ANOTHER profile: run `hermes handoff webui` to switch it to this one)")) if w["detected"] else "not detected"))
         if not r["ready"]:
             print("  fix:      hermes handoff setup" + (f"   (or: {r['install_command']})" if r.get("install_command") else ""))
         return 0

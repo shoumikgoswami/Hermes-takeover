@@ -55,7 +55,7 @@ def _on_session_start(**kwargs) -> None:
     def work() -> None:
         try:
             core = _load_core()
-            if core.webui.state_dir() is None:
+            if core.webui.state_dir() is None or not core.webui.enabled():
                 return
             core.webui.integrate(core.compat.current_home())
         except Exception:  # noqa: BLE001 - never let a helper break a chat session

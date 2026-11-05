@@ -47,6 +47,7 @@ api = _load("hermes_dashboard_plugin_handoff", ROOT / "dashboard" / "plugin_api.
 plugin_init = _load("handoff_plugin_init", ROOT / "__init__.py")
 
 BD = core.compat.load()
+core.webui.state_dir = lambda: None        # unit tests must never install into / spawn a service for a real hermes-webui
 KEY = bytes([4, 1, 0, 0, 0, 0, 0, 0x61])             # KeyEvent down 'a'
 PTR = bytes([5, 1, 0, 10, 0, 10])                    # PointerEvent
 FBUR = bytes([3, 1, 0, 0, 0, 0, 0, 10, 0, 10])       # FramebufferUpdateRequest (never input)

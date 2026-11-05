@@ -4,14 +4,16 @@ users install it. Everything the browser does goes through WebUI's authenticated
   S=<scratch HERMES_HOME>  W=<scratch WebUI state dir>
   HERMES_HOME=$S hermes plugins install file://<repo> --enable --yes-deps
   (start hermes-webui with HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W HERMES_WEBUI_PASSWORD=e2e-pass-123 HERMES_WEBUI_PORT=8798 ...)
-  HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W hermes handoff webui
-  E2E_HOME=$S <hermes-venv-python> tests/e2e/run_webui_e2e.py
+  HANDOFF_PORT=17951 HERMES_HOME=$S HERMES_WEBUI_STATE_DIR=$W hermes handoff webui
+  E2E_HOME=$S E2E_STATE=$W <hermes-venv-python> tests/e2e/run_webui_e2e.py
 """
 import json, os, subprocess, sys, tempfile, threading, time, urllib.error, urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 from cdp import Chrome
 
 HOME = os.environ["E2E_HOME"]
+STATE = os.environ["E2E_STATE"]            # the scratch WebUI's state dir
+PORT = os.environ.get("HANDOFF_PORT", "17901")   # use a spare port so a real Handoff service on this host is not disturbed
 URL = os.environ.get("E2E_URL", "http://127.0.0.1:8798")
 PASSWORD = os.environ.get("E2E_PASSWORD", "e2e-pass-123")
 SHOTS = os.environ.get("E2E_SHOTS", tempfile.mkdtemp(prefix="handoff-webui-shots-")); os.makedirs(SHOTS, exist_ok=True)
@@ -46,7 +48,7 @@ def raw(url, method="GET", headers=None, data=None):
         return urllib.request.urlopen(urllib.request.Request(url, method=method, headers=headers or {}, data=data)).status
     except urllib.error.HTTPError as e:
         return e.code
-check("the sidecar refuses requests without WebUI's token (503 until WebUI mints it, then 401)", raw("http://127.0.0.1:17901/api/status") in (401, 503))
+check("the sidecar refuses requests without WebUI's token (503 until WebUI mints it, then 401)", raw(f"http://127.0.0.1:{PORT}/api/status") in (401, 503))
 check("WebUI's proxy refuses an unauthenticated browser (401)", raw(f"{URL}/api/extensions/handoff/sidecar/api/status") == 401)
 
 
@@ -74,7 +76,8 @@ spec = importlib.util.spec_from_file_location('hermes_handoff_core', os.path.joi
 m = importlib.util.module_from_spec(spec); sys.modules['hermes_handoff_core'] = m; spec.loader.exec_module(m)
 print(m.tool.handle({args!r}))
 """
-    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=240)
+    env = dict(os.environ, HERMES_WEBUI_STATE_DIR=STATE, HANDOFF_PORT=PORT)       # never let the tool's auto-integration touch the real WebUI
+    p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=240, env=env)
     box.append(p.stdout.strip().splitlines()[-1] if p.stdout.strip() else "ERR " + p.stderr[-400:])
 
 
@@ -101,7 +104,7 @@ try:
     r = A.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'handoff',approved:true})}).then(r=>r.status)", True)
     check("approving the proxy succeeds (WebUI auth on, token-v1)", r == 200, r)
 
-    check("after consent the sidecar refuses a wrong token (401)", raw("http://127.0.0.1:17901/api/status", headers={"X-Hermes-Sidecar-Token": "nope"}) == 401)
+    check("after consent the sidecar refuses a wrong token (401)", raw(f"http://127.0.0.1:{PORT}/api/status", headers={"X-Hermes-Sidecar-Token": "nope"}) == 401)
     A.wait("document.querySelector('#mainHandoff [data-f=state]').textContent==='Screen is off'", 30)
     check("after approval: screen off on a fresh home, Start offered", has(A, "#mainHandoff [data-f=start]"))
     A.screenshot(f"{SHOTS}/2-off.png")

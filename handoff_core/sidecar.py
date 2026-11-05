@@ -72,6 +72,12 @@ def check_token(presented: Optional[str]) -> int:
     return 200
 
 
+def home_id(home) -> str:
+    """Short hash that identifies which Hermes home a sidecar serves (no paths on an unauthenticated route)."""
+    import hashlib
+    return hashlib.sha256(str(Path(str(home)).resolve()).encode()).hexdigest()[:10]
+
+
 # ── RFB sessions ──────────────────────────────────────────────────────────────
 class Session:
     def __init__(self, home: str, viewer_id: str, upstream, relay=None):
@@ -250,6 +256,7 @@ class Sessions:
 class App:
     def __init__(self) -> None:
         self.home = compat.current_home()
+        self.home_id = home_id(self.home)
         self.sessions = Sessions()
         compat.load()
 
@@ -372,7 +379,7 @@ def make_handler(app: App):
             try:
                 if u.path == "/health":
                     st, hdr, out = 200, {"Content-Type": "application/json"}, json.dumps(
-                        {"ok": True, "service": PLUGIN_ID, "version": __version__, "pid": os.getpid()}).encode()
+                        {"ok": True, "service": PLUGIN_ID, "version": __version__, "pid": os.getpid(), "home_id": app.home_id}).encode()
                 else:
                     code = check_token(self.headers.get(HEADER))
                     if code != 200:

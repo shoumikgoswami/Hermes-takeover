@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from . import PLUGIN_ID, __version__, compat, state
-from .sidecar import DEFAULT_PORT
+from .sidecar import DEFAULT_PORT, home_id
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 SRC = PLUGIN_ROOT / "webui"
@@ -76,6 +76,12 @@ def install_extension(sd: Optional[Path] = None) -> Dict[str, Any]:
         shutil.rmtree(dest)
     shutil.copytree(SRC, dest)
     shutil.copytree(NOVNC, dest / "assets" / "novnc")          # one copy of noVNC in the repo; copied at install
+    man_path = dest / "manifest.json"                          # the sidecar port is baked into the manifest (HANDOFF_PORT)
+    manifest = json.loads(man_path.read_text(encoding="utf-8"))
+    for ext in manifest.get("extensions", []):
+        if isinstance(ext.get("sidecar"), dict):
+            ext["sidecar"]["origin"] = f"http://127.0.0.1:{port()}"
+    man_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     files = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
     man = state.read_json(sd / INSTALL_MANIFEST) or {}
     if not isinstance(man.get("installed"), dict):
@@ -134,7 +140,10 @@ def ensure_sidecar(home, restart: bool = False) -> Dict[str, Any]:
     try:
         h = health()
         if h and not restart and h.get("version") == __version__:
-            return {"running": True, "started": False, "version": h.get("version")}
+            other = bool(h.get("home_id")) and h["home_id"] != home_id(home)
+            # a sidecar serves ONE Hermes home (the control lease lives there). The first one wins; an explicit
+            # `hermes handoff webui` takes over for this profile.
+            return {"running": True, "started": False, "version": h.get("version"), "other_profile": other}
         if h:                                                   # stale version, or an explicit restart
             stop_sidecar(home)
         sd = state_dir()
@@ -165,14 +174,20 @@ def status(home) -> Dict[str, Any]:
     sd = state_dir()
     h = health(0.5)
     return {"detected": bool(sd), "state_dir": str(sd) if sd else None, "extension": installed_version(sd),
-            "sidecar": bool(h), "sidecar_version": (h or {}).get("version")}
+            "sidecar": bool(h), "sidecar_version": (h or {}).get("version"), "enabled": enabled(),
+            "serves_this_profile": bool(h) and (not h.get("home_id") or h["home_id"] == home_id(home))}
+
+
+def enabled() -> bool:
+    """``plugins.entries.handoff.settings.webui_integration`` (default on): set false to never touch hermes-webui."""
+    return bool(compat.setting("webui_integration", True))
 
 
 def integrate(home, force: bool = False) -> Dict[str, Any]:
-    """Idempotent. Without WebUI on this host it does nothing (and says so)."""
+    """Idempotent. Without WebUI on this host (or when switched off) it does nothing (and says so)."""
     sd = state_dir()
-    if not sd:
-        return {"detected": False}
+    if not sd or (not force and not enabled()):
+        return {"detected": bool(sd), "disabled": bool(sd)}
     out: Dict[str, Any] = {"detected": True, "state_dir": str(sd)}
     if force or installed_version(sd) != __version__ or not (sd / "extensions" / PLUGIN_ID / "manifest.json").exists():
         out["extension"] = install_extension(sd)

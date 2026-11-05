@@ -35,6 +35,8 @@ if "hermes_handoff_core" not in sys.modules:
 core = sys.modules["hermes_handoff_core"]
 sc = core.sidecar
 BD = core.compat.load()
+_real_state_dir = core.webui.state_dir
+core.webui.state_dir = lambda: None        # same rule; TestWebuiIntegration passes explicit scratch dirs
 KEY = bytes([4, 1, 0, 0, 0, 0, 0, 0x61])
 PTR = bytes([5, 1, 0, 10, 0, 10])
 FBUR = bytes([3, 1, 0, 0, 0, 0, 0, 10, 0, 10])
@@ -293,6 +295,16 @@ class TestControl(Base):
 
 
 class TestWebuiIntegration(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.srv = sc.Server(("127.0.0.1", 0), sc.make_handler(sc.App()))
+        cls.port = cls.srv.server_address[1]
+        threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
     def setUp(self):
         self.sd = Path(tempfile.mkdtemp(dir=TMP))
         self.webui = core.webui
@@ -308,6 +320,16 @@ class TestWebuiIntegration(unittest.TestCase):
         self.assertEqual(self.webui.installed_version(self.sd), core.__version__)
         self.webui.install_extension(self.sd)
         self.assertEqual(len(json.loads((self.sd / "extension-install-manifest.json").read_text())["installed"]), 1)
+
+    def test_sidecar_port_follows_HANDOFF_PORT(self):
+        old = os.environ.get("HANDOFF_PORT")
+        os.environ["HANDOFF_PORT"] = "17951"
+        try:
+            self.webui.install_extension(self.sd)
+        finally:
+            os.environ.pop("HANDOFF_PORT") if old is None else os.environ.__setitem__("HANDOFF_PORT", old)
+        man = json.loads((self.sd / "extensions" / "handoff" / "manifest.json").read_text())
+        self.assertEqual(man["extensions"][0]["sidecar"]["origin"], "http://127.0.0.1:17951")
 
     def test_other_installed_extensions_are_preserved(self):
         (self.sd / "extension-install-manifest.json").write_text(json.dumps({"version": 1, "installed": {"btop": {"version": "1", "files": ["manifest.json"], "installed_at": "x"}}}))
@@ -329,14 +351,23 @@ class TestWebuiIntegration(unittest.TestCase):
         self.assertNotIn("force=True", src)
 
     def test_nothing_happens_without_webui(self):
-        old = os.environ.pop("HERMES_WEBUI_STATE_DIR", None)
-        real = Path.home
-        Path.home = classmethod(lambda cls: Path(TMP) / "nohome")
+        self.assertEqual(self.webui.integrate(HOME), {"detected": False, "disabled": False})
+
+    def test_switch_off_means_hands_off(self):
+        saved = (self.webui.state_dir, core.compat.setting)
+        self.webui.state_dir = lambda: self.sd
+        core.compat.setting = lambda k, d=None: False if k == "webui_integration" else d
         try:
-            self.assertEqual(self.webui.integrate(HOME), {"detected": False})
+            self.assertEqual(self.webui.integrate(HOME), {"detected": True, "disabled": True})
+            self.assertFalse((self.sd / "extensions").exists())          # nothing written, no process started
         finally:
-            Path.home = real
-            if old: os.environ["HERMES_WEBUI_STATE_DIR"] = old
+            self.webui.state_dir, core.compat.setting = saved
+
+    def test_health_identifies_the_profile_so_a_foreign_sidecar_is_not_mistaken_for_ours(self):
+        h = json.loads(__import__("urllib.request").request.urlopen(f"http://127.0.0.1:{TestWebuiIntegration.port}/health").read())
+        self.assertEqual(h["home_id"], sc.home_id(HOME))
+        self.assertNotEqual(sc.home_id(HOME), sc.home_id(os.path.join(TMP, "other")))
+        self.assertNotIn(HOME, json.dumps(h))
 
 
 if __name__ == "__main__":

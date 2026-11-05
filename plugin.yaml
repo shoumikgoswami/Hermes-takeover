@@ -16,3 +16,7 @@ config_schema:
     type: bool
     default: true
     description: "On first use, install the screen packages (needs root access without a password prompt) and enable browser.headed automatically."
+  webui_integration:
+    type: bool
+    default: true
+    description: "If hermes-webui is on this host, install its Screen page and run the Handoff service for it (first agent session). Set false to never touch hermes-webui."
