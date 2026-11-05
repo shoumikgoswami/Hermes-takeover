@@ -206,9 +206,14 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     print(f"      phone view: scale {st0['s']} (fit {st0['fit']}), desktop {st0['fb']}")
     check("phone default zoom is more readable than fit-to-width", st0["s"] > st0["fit"] + 0.05 or st0["s"] >= 0.99, str(st0))
     A.eval("document.querySelector('#mainHandoff .hdo-stage').scrollIntoView()")
+    nonlocal_stage = [None]
     stage = A.eval("(()=>{const r=document.querySelector('#mainHandoff .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
     print(f"      stage {stage[2]:.0f}x{stage[3]:.0f} css px of a {A.eval('innerHeight')} px tall phone screen")
+    def srect():
+        A.eval("document.querySelector('#mainHandoff .hdo-stage').scrollIntoView({block:'center'})"); time.sleep(0.3)
+        return A.eval("(()=>{const r=document.querySelector('#mainHandoff .hdo-stage').getBoundingClientRect();return [r.left,r.top,r.width,r.height]})()")
     def to_client(rx, ry):
+        nonlocal_stage[0] = stage = srect()
         A.eval(f"window.__hermesHandoff.tv().reveal({rx}, {ry})"); time.sleep(0.2)       # bring the target into view first
         v = V(); x, y = stage[0] + v["tx"] + rx * v["s"], stage[1] + v["ty"] + ry * v["s"]
         assert stage[0] < x < stage[0] + stage[2] and stage[1] < y < stage[1] + stage[3], ("target outside the stage", x, y, stage)
@@ -221,10 +226,12 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
         for i in range(1, steps + 1):
             touch("touchMove", [(x0 + (x1 - x0) * i / steps, y0 + (y1 - y0) * i / steps)]); time.sleep(dt)
         touch("touchEnd", [])
-    cx = stage[0] + stage[2] / 2; cy = stage[1] + stage[3] / 2
+    def centre():
+        r = srect(); return r[0] + r[2] / 2, r[1] + r[3] / 2
+    cx, cy = centre()
 
     # one-finger drag scrolls the remote page, 1:1 with the finger
-    y_before = int(kv()["y"]); s = V()["s"]
+    cx, cy = centre(); y_before = int(kv()["y"]); s = V()["s"]
     drag(cx, cy + 100, cx, cy - 100, steps=20, dt=0.03)          # slow, no fling
     time.sleep(1.5); moved = int(kv()["y"]) - y_before
     expected = 200 / s
@@ -236,7 +243,7 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("dragging the other way scrolls back up", int(kv()["y"]) < y_before + moved - 0.5 * expected, title())
 
     # a quick flick keeps going (momentum)
-    y1 = int(kv()["y"]); drag(cx, cy + 150, cx, cy - 150, steps=6, dt=0.008); time.sleep(2.5)
+    cx, cy = centre(); y1 = int(kv()["y"]); drag(cx, cy + 150, cx, cy - 150, steps=6, dt=0.008); time.sleep(2.5)
     flung = int(kv()["y"]) - y1
     check("a quick flick scrolls further than the finger travelled (momentum)", flung > 300 / V()["s"] * 1.3, f"{flung}")
 
@@ -248,10 +255,8 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     c0 = int(kv()["c"]); touch("touchStart", [(tx_, ty_)]); time.sleep(0.05); touch("touchEnd", []); time.sleep(1)
     check("a tap clicks exactly where the finger is (remote button pressed once)", int(kv()["c"]) == c0 + 1, title())
 
-    A.eval("window.__tl=[]; ['touchstart','touchmove','touchend'].forEach(k=>window.addEventListener(k,e=>window.__tl.push(k[5]+e.touches.length+'/'+e.changedTouches.length),true))")
     # two-finger tap = right click
     x0_ = int(kv()["x"]); touch("touchStart", [(tx_ - 30, ty_ + 60), (tx_ + 30, ty_ + 60)]); time.sleep(0.06); touch("touchEnd", []); time.sleep(1)
-    print("      touch log:", A.eval("window.__tl.join(' ')"))
     check("two-finger tap sends a right click (contextmenu on the remote page)", int(kv()["x"]) == x0_ + 1, title())
 
     # hold then drag selects text
@@ -263,17 +268,11 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("hold-then-drag selects text on the remote page", len(sel) > 10, repr(sel))
 
     # pinch zoom changes the view, and taps stay accurate afterwards
-    z0 = V()["s"]
-    A.eval("window.__err=[]; addEventListener('error', e=>window.__err.push(e.message+' @'+e.lineno))")
+    cx, cy = centre(); z0 = V()["s"]
     touch("touchStart", [(cx - 40, cy), (cx + 40, cy)])
-    print("      after start g:", A.eval("JSON.stringify(window.__hermesHandoff.tv().g)"))
-    for i in range(1, 11):
-        touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
-        if i in (1, 10): print("      move", i, A.eval("JSON.stringify(window.__hermesHandoff.tv().g)"), V()["s"])
+    for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
     touch("touchEnd", []); time.sleep(0.4)
     z1 = V()["s"]
-    print("      page errors:", A.eval("window.__err"), "g=", A.eval("JSON.stringify(window.__hermesHandoff.tv().g)"))
-    print("      pinch log:", A.eval("window.__tl.slice(-8).join(' ')"), "| view", V())
     check("pinch zooms the view in", z1 > z0 * 1.4, f"{z0} -> {z1}")
     R.eval("window.scrollTo(0,0)"); time.sleep(1)
     bx, by, bw, bh, ox, oy = rect("#b"); tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)
