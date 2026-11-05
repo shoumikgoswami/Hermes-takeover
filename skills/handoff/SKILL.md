@@ -5,7 +5,7 @@ description: "Use when a browser step needs the human (login, 2FA, CAPTCHA, paym
 
 # Handoff: asking the human to take over the screen
 
-The user can open the Hermes dashboard's **Screen** tab (works from a phone), see your Chrome live, tap
+The user can open the **Screen** page in hermes-webui or the Hermes dashboard (works from a phone), see your Chrome live, tap
 **Take over**, do the step, and **Hand back**. What they do happens in *your* browser profile, so a login they
 complete is *your* login.
 
@@ -24,8 +24,8 @@ Whenever the next step is one you must not or cannot do yourself:
    Do not retry in a loop.
 
 ## While the human has control
-Every screen/browser tool is refused with `HumanHasControl` (even screenshots, they may be typing a credential).
-Do not work around it (no terminal tricks against the display) and do not poll.
+Every screen/browser tool is refused (even screenshots and raw CDP; they may be typing a credential).
+Do not work around it: no terminal, code-execution or CDP-client tricks against the display or the browser, and do not poll.
 
 ## Never
 - Ask the user to paste a password, code or card number into chat.

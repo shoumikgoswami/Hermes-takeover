@@ -15,7 +15,8 @@ One native Hermes plugin. No tunnel, no reverse proxy, no extra port to open, no
 hermes plugins install shoumikgoswami/Hermes-handoff --enable
 ```
 
-Then just use Hermes. The first agent session wires everything up (below). Remove with `hermes plugins remove handoff`.
+Then just use Hermes. The first agent session wires everything up (below). Remove with `hermes plugins remove handoff`;
+within a few seconds its WebUI service notices, removes the Screen page from WebUI and exits.
 
 | Surface | How it appears | Your one manual step |
 |---|---|---|
@@ -34,7 +35,8 @@ Then just use Hermes. The first agent session wires everything up (below). Remov
 
 Triggers: first agent session, first Screen visit, first `request_handoff`, or `hermes handoff setup` / `hermes handoff webui`.
 It runs once automatically; afterwards only on request. Switches (`hermes config set plugins.entries.handoff.settings.<key> false`):
-`auto_install` (packages + headed browser) and `webui_integration` (never touch hermes-webui). Linux only (Bot Desktop is
+`auto_install` (packages + headed browser), `webui_integration` (never touch hermes-webui) and `fence_browser_tools`
+(pause browser tools while you hold control). Linux only (Bot Desktop is
 Linux-only); the tool hides itself elsewhere.
 
 ## Using it
@@ -46,8 +48,11 @@ Linux-only); the tool hides itself elsewhere.
 | `completed` | You did the step and handed back. The agent takes a fresh screenshot and continues. |
 | `timeout` / `still_with_human` / `dismissed` / `cancelled` | The agent tells you what it is waiting for and stops. |
 
-While you hold control every screen/browser tool is refused (`HumanHasControl`), even screenshots, because you may be
-typing a credential. A bundled skill (`handoff:handoff`) teaches the agent when to ask and never to request secrets in chat.
+While you hold control every screen/browser tool is refused, even screenshots, because you may be typing a credential.
+Hermes fences its own local browser sessions and `computer_use`; Handoff adds a `pre_tool_call` veto on every `browser_*`
+tool and `computer_use` for the profile, which also covers what Hermes leaves open: a browser reached through
+`browser.cdp_url` and the raw `browser_cdp` tool (opt out: `fence_browser_tools: false`). It cannot fence `terminal` or
+code execution, so the agent could still reach the browser through a shell (see Security model). A bundled skill (`handoff:handoff`) teaches the agent when to ask and never to request secrets in chat.
 
 **Your side.** Open **Screen**. The status line says who is driving; the video is view-only until you **Take over**
 (enforced server-side, not just in the UI).
@@ -59,9 +64,9 @@ typing a credential. A bundled skill (`handoff:handoff`) teaches the agent when 
 - **⌨ Keyboard** opens the phone keyboard. **Type text** sends a pasted string as keystrokes (best for passwords with symbols).
   Esc / Tab / Enter / Ctrl+L / Ctrl+A / Ctrl+V are always there. **Paste from phone** needs HTTPS or localhost.
 - Closed the tab mid-takeover? The agent stays locked out until you reopen Screen and press **Force hand-back**
-  (or `hermes handoff release`, or `/handoff release`). A second device's Take over evicts the first.
+  (or `hermes handoff release`, or `/screen release`). A second device's Take over evicts the first.
 
-**CLI.** `hermes handoff status | setup | screen | release | webui [--remove]` and `/handoff` in any chat.
+**CLI.** `hermes handoff status | setup | screen | release | webui [--remove]` and `/screen` in any chat (Hermes's own `/handoff` is a different, built-in command).
 
 ## How it works
 
@@ -87,15 +92,21 @@ byte rides WebUI's authenticated proxy, no ticket, extra port or CSP change is n
   running as you (including the agent).
 - Server-side the RFB filter drops key / pointer / clipboard / resize messages unless the lease says *this* viewer holds it;
   noVNC's view-only flag is only UX. Verified by sending forged key events from a watching page.
-- The lease is a tool-level fence, not an OS boundary: anything you type is visible to the agent's browser. Don't enter a
-  secret you would not trust the agent with.
+- The lease is a tool-level fence, not an OS boundary: the agent's browser tools are paused, but the browser itself is the
+  agent's, and a determined agent could read the page through `terminal` / code execution (e.g. its own CDP client). Don't
+  enter a secret you would not trust the agent with. Input from a viewer that just lost control can still land for up to
+  0.25 s (the sidecar re-reads the lease at most four times a second).
 - Logs never contain tickets, stream session ids, full viewer ids, keystrokes or frames (the sidecar logs no URLs).
 - The plugin runs with your user's permissions, like any Hermes plugin. Its only privileged action is the package install,
   delegated to Hermes's Bot Desktop installer; it has no code path of its own that escalates privileges. Its only writes
   outside its own data dir: `browser.headed` in config, and (WebUI) the extension folder + install manifest in WebUI's state dir.
 - A WebUI service serves **one Hermes profile** (the lease lives in the profile's home). The first profile to start it wins;
   `hermes handoff webui` from another profile takes it over; `hermes handoff status` says when it is serving a different one.
-  Port clash? `HANDOFF_PORT=<n> hermes handoff webui` rewrites the extension to match.
+  Port clash? `HANDOFF_PORT=<n> hermes handoff webui` rewrites the extension to match. Switching profiles inside WebUI does
+  not switch the Screen page; it keeps showing the profile the service serves.
+- The WebUI service is started by an agent session (or `hermes handoff webui`); after a reboot the Screen page says the
+  service is down until the next agent session starts it. There is no systemd unit, by design.
+- One pending request per profile: two agent sessions of the same profile asking at once share one request card.
 
 ## Requirements and limits
 

@@ -1,6 +1,6 @@
 """Handoff: let a human take over the agent's screen, do the step only they can do, and hand control back.
 
-Surfaces registered here: the ``request_handoff`` tool, ``hermes handoff`` and ``/handoff``, and a bundled skill.
+Surfaces registered here: the ``request_handoff`` tool, ``hermes handoff`` and ``/screen``, and a bundled skill.
 The dashboard half (Screen tab, routes, live view) is in ``dashboard/``.
 """
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _slash(raw: str) -> str:
              f"Control: {ls['holder']}" + (f" ({ls['reason']})" if ls.get("reason") else "")]
     if rq:
         lines.append(f"Agent request: {rq['reason']} [{rq['status']}]")
-    lines.append("Take over from the Screen page (hermes-webui or the dashboard). `/handoff release` returns control to the agent.")
+    lines.append("Take over from the Screen page (hermes-webui or the dashboard). `/screen release` returns control to the agent.")
     return "\n".join(lines)
 
 
@@ -79,7 +79,7 @@ def register(ctx) -> None:
                       check_fn=core.tool.available, emoji="\U0001F590", description=core.tool.SCHEMA["description"][:200])
     ctx.register_cli_command(name="handoff", help="Take over the agent's screen: status, setup, release",
                              setup_fn=core.cli.setup_parser, handler_fn=core.cli.run)
-    ctx.register_command("handoff", _slash, description="Show who controls the agent's screen; `/handoff release` hands it back")
+    ctx.register_command("screen", _slash, description="Who controls the agent's screen (Handoff); `/screen release` hands it back")  # /handoff is a Hermes built-in
     skills = Path(__file__).resolve().parent / "skills"
     if skills.is_dir() and hasattr(ctx, "register_skill"):
         for child in sorted(skills.iterdir()):

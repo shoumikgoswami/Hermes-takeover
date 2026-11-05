@@ -447,7 +447,7 @@ class TestTool(Base):
             def register_skill(s, name, path): s.skills.append((name, Path(path).exists()))
         c = Ctx()
         plugin_init.register(c)
-        self.assertEqual((c.tools, c.cli, c.cmds, c.skills, c.hooks), (["request_handoff"], ["handoff"], ["handoff"], [("handoff", True)], ["on_session_start", "pre_tool_call"]))
+        self.assertEqual((c.tools, c.cli, c.cmds, c.skills, c.hooks), (["request_handoff"], ["handoff"], ["screen"], [("handoff", True)], ["on_session_start", "pre_tool_call"]))
         self.assertEqual(core.tool.SCHEMA["parameters"]["required"], ["reason"])
 
 
