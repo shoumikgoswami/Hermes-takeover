@@ -22,7 +22,7 @@ within a few seconds its WebUI service notices, removes the Screen page from Web
 
 | Surface | How it appears | Your one manual step |
 |---|---|---|
-| **hermes-webui** (the `:8787` app) | A **Screen** icon in the rail / phone nav; while the agent is asking, a banner on every page with **Take over** (one tap) and **Just watch**. A link to `<webui>/#takeover` does the same. | Settings → Extensions → Diagnostics → Loopback sidecars → **Takeover** → **Approve proxy**. That is WebUI's own security consent, and WebUI authentication must be on (Settings → set a password). The Screen page tells you this until you do it. |
+| **hermes-webui** (the `:8787` app). Takeover shows in two places: **Settings → Plugins** lists the Hermes plugin (tool and hooks) with an **Open Screen** button; **Settings → Extensions** lists the Screen page and its service. WebUI only gives extensions a backend, so the live screen has to be an extension. | A **Screen** icon in the rail / phone nav; while the agent is asking, a banner on every page with **Take over** (one tap) and **Just watch**. A link to `<webui>/#takeover` does the same. | Settings → Extensions → Diagnostics → Loopback sidecars → **Takeover** → **Approve proxy**. That is WebUI's own security consent, and WebUI authentication must be on (Settings → set a password). The Screen page tells you this until you do it. |
 | **Hermes dashboard** (`hermes dashboard`) | A **Screen** tab; the same banner on every page (one-tap **Take over** = `/takeover?take=1`) | none (restart the dashboard once if it was already running) |
 
 ### What "first run" does (automatically, once)
@@ -119,6 +119,10 @@ byte rides WebUI's authenticated proxy, no ticket, extra port or CSP change is n
 - The WebUI service is started by an agent session (or `hermes takeover webui`); after a reboot the Screen page says the
   service is down until the next agent session starts it. There is no systemd unit, by design.
 - One pending request per profile: two agent sessions of the same profile asking at once share one request card.
+- hermes-webui's **Settings → Plugins** lists the plugins of WebUI's own Hermes home (normally the default profile),
+  whichever profile you chat in. A Takeover installed only in another profile works but is not listed there.
+- hermes-webui also lists the plugin's dashboard tab as "Screen". WebUI opens such tabs in a sandboxed iframe that cannot
+  load its script while WebUI auth is on, so Takeover sends that tab's Open button to the live Screen page instead.
 
 ## Requirements and limits
 

@@ -1,7 +1,7 @@
 name: takeover
 version: 0.3.0
 manifest_version: 2
-description: "Take over the agent's browser from the Hermes dashboard or hermes-webui (or your phone): do a login, 2FA, CAPTCHA or payment yourself, then hand control back. Adds the request_takeover tool (the agent asks you to sign in, approve, enter a code or clear a CAPTCHA; one tap to take over), a Screen page, and `hermes takeover`."
+description: "When a step needs you (sign-in, approve or authorize, 2FA code, CAPTCHA, payment), the agent asks and you tap Take over in hermes-webui or the Hermes dashboard, even on your phone. Do it in the agent's browser, hand back, and it carries on."
 author: Shoumik Goswami
 homepage: https://github.com/shoumikgoswami/Hermes-takeover
 license: MIT

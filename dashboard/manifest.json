@@ -1,7 +1,7 @@
 {
   "name": "takeover",
   "label": "Screen",
-  "description": "See and take over the agent's browser; hand control back when you are done.",
+  "description": "Live view of the agent's browser with one-tap Take over and Hand back.",
   "icon": "Eye",
   "version": "0.3.0",
   "tab": {
