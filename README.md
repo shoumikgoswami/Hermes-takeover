@@ -52,7 +52,10 @@ typing a credential. A bundled skill (`handoff:handoff`) teaches the agent when 
 **Your side.** Open **Screen**. The status line says who is driving; the video is view-only until you **Take over**
 (enforced server-side, not just in the UI).
 
-- Phone: tap = click · two-finger tap = right click · hold then drag = drag · two-finger drag = scroll · **Zoom** = fit / 100% with panning.
+- Phone (hermes-webui): **drag = scroll** (the page follows your finger, with momentum) · tap = click · hold, then drag = select text / drag
+  and drop · pinch = zoom and pan · two-finger tap = right click. **More** shows zoom −/+/Fit/Reset, Ctrl+L/A/V and Type text. While you are only
+  watching, a drag pans the view. A mouse works too (wheel scrolls, Ctrl+wheel zooms). The stage fills about three quarters of a phone screen.
+- The dashboard Screen tab still uses noVNC's own touch handling (two-finger drag = scroll).
 - **⌨ Keyboard** opens the phone keyboard. **Type text** sends a pasted string as keystrokes (best for passwords with symbols).
   Esc / Tab / Enter / Ctrl+L / Ctrl+A / Ctrl+V are always there. **Paste from phone** needs HTTPS or localhost.
 - Closed the tab mid-takeover? The agent stays locked out until you reopen Screen and press **Force hand-back**
@@ -102,6 +105,8 @@ byte rides WebUI's authenticated proxy, no ticket, extra port or CSP change is n
 - The agent's browser must be headed and started *after* setup; an already-running headless Chrome shows an empty desktop.
 - hermes-webui: authentication must be on (WebUI's rule for token-protected extension backends). Extensions run with full WebUI
   session authority; this one is small, has no third-party scripts, and noVNC is vendored.
+- Remote scrolling is sent as mouse-wheel notches (one notch = about 96 px in Chrome); other apps scroll by other amounts per notch, so the
+  finger tracking is exact only in Chrome-like apps (constant `NOTCH_PX` in `touch.js`).
 - The long-poll channel adds about one HTTP round trip of latency per input; fine for forms, not for games.
 
 ## Layout
@@ -111,9 +116,9 @@ plugin.yaml  __init__.py  sidecar_run.py     tool, CLI, slash command, session h
 handoff_core/   compat (hermes-agent seam) · setup (first run) · control (lease ops) · state · tickets · bridge (dashboard WS)
                 sidecar (hermes-webui backend + long-poll stream) · webui (install extension, keep service up) · tool · cli
 dashboard/      manifest.json · plugin_api.py (routes + WebSocket) · dist/ (index.js, style.css, novnc/ 1.6.0 vendored)
-webui/          manifest.json · assets/handoff.js + handoff.css   (noVNC is copied in from dashboard/dist at install)
+webui/          manifest.json · assets/handoff.js + handoff.css + touch.js (phone gestures)   (noVNC is copied in from dashboard/dist at install)
 skills/handoff/SKILL.md
-tests/          test_core.py (37) · test_sidecar.py (25) · e2e/run_e2e.py (dashboard, 25 checks) · e2e/run_webui_e2e.py (WebUI, 30 checks)
+tests/          test_core.py (37) · test_sidecar.py (25) · e2e/run_e2e.py (dashboard, 25 checks) · e2e/run_webui_e2e.py (WebUI, 41 checks, incl. real touch gestures)
 ```
 
 ## Tests
