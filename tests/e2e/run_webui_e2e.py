@@ -268,6 +268,7 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     for i in range(1, 11): touch("touchMove", [(cx - 40 - i * 6, cy), (cx + 40 + i * 6, cy)]); time.sleep(0.016)
     touch("touchEnd", []); time.sleep(0.4)
     z1 = V()["s"]
+    print("      pinch log:", A.eval("window.__tl.slice(-8).join(' ')"), "| view", V())
     check("pinch zooms the view in", z1 > z0 * 1.4, f"{z0} -> {z1}")
     R.eval("window.scrollTo(0,0)"); time.sleep(1)
     bx, by, bw, bh, ox, oy = rect("#b"); tx_, ty_ = to_client(ox + bx + bw / 2, oy + by + bh / 2)

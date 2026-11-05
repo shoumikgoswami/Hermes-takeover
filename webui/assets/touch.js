@@ -226,7 +226,7 @@ export class TouchView {
     if (this._ui(e)) return;
     e.preventDefault(); e.stopPropagation();
     const g = this.g; if (!g) return;
-    if (e.touches.length > 0) { if (g.mode === 'pinch') g.mode = 'ignore'; return; }   // 2 -> 1 finger: wait for all up
+    if (e.touches.length > 0) return;      // 2 -> 1 finger: wait until every finger is up (a lone remaining finger does nothing)
     clearTimeout(g.timer); this.g = null;
     const dur = performance.now() - g.t0;
     const ct = e.changedTouches[0];
