@@ -44,7 +44,7 @@ def _slash(raw: str) -> str:
              f"Control: {ls['holder']}" + (f" ({ls['reason']})" if ls.get("reason") else "")]
     if rq:
         lines.append(f"Agent request: {rq['reason']} [{rq['status']}]")
-    lines.append("Take over from the dashboard: Screen tab. `/handoff release` returns control to the agent.")
+    lines.append("Take over from the Screen page (hermes-webui or the dashboard). `/handoff release` returns control to the agent.")
     return "\n".join(lines)
 
 
@@ -63,9 +63,18 @@ def _on_session_start(**kwargs) -> None:
     threading.Thread(target=work, name="handoff-webui", daemon=True).start()
 
 
+def _pre_tool_call(**kwargs):
+    """Pause browser / screen tools while a human holds the screen (see handoff_core/fence.py)."""
+    try:
+        return _load_core().fence.check(**kwargs)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def register(ctx) -> None:
     core = _load_core()
     ctx.register_hook("on_session_start", _on_session_start)
+    ctx.register_hook("pre_tool_call", _pre_tool_call)
     ctx.register_tool(name=core.tool.NAME, toolset="handoff", schema=core.tool.SCHEMA, handler=core.tool.handle,
                       check_fn=core.tool.available, emoji="\U0001F590", description=core.tool.SCHEMA["description"][:200])
     ctx.register_cli_command(name="handoff", help="Take over the agent's screen: status, setup, release",

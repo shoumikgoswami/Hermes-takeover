@@ -14,8 +14,8 @@ SCHEMA = {
     "name": NAME,
     "description": (
         "Ask the human to take over the browser/desktop screen for a step only they can do: a login, password, 2FA/SMS "
-        "code, CAPTCHA, payment, or an unexpected consent page. The user sees your request in the Hermes dashboard's "
-        "Screen tab (and on their phone), taps Take over, does the step in the SAME browser you are using, then hands "
+        "code, CAPTCHA, payment, or an unexpected consent page. The user sees your request on the Screen page of "
+        "hermes-webui or the Hermes dashboard (also on their phone), taps Take over, does the step in the SAME browser you are using, then hands "
         "control back. This call WAITS until they have handed back (default up to 15 minutes), so you do not need to "
         "ask them to say 'done'. While they hold control, all your screen/browser tools are refused. Never ask the user "
         "to type secrets into chat; use this instead. After it returns 'completed', take a fresh screenshot/snapshot "
@@ -88,9 +88,10 @@ def _handle(args: Dict[str, Any]) -> str:
     if ready.get("headed") is False:
         warn = (" Note: browser.headed is off, so your Chrome may be headless and the human may see an empty desktop; "
                 "run `hermes config set browser.headed true`.")
+    epoch0 = bd.lease.get(profile_key=home).epoch
     req = state.create_request(home, reason)
     if wait == 0:
-        return _out("requested", "Request posted on the Screen tab. Stop and tell the user to open Screen -> Take over, "
+        return _out("requested", "Request posted on the Screen page. Stop and tell the user to open Screen -> Take over, "
                     "do the step, then Hand back." + warn)
 
     from tools import interrupt
@@ -100,12 +101,15 @@ def _handle(args: Dict[str, Any]) -> str:
             state.update_request(home, req["id"], status="cancelled")
             return _out("cancelled", "Interrupted while waiting for the human.")
         cur = state.get_request(home) or {}
-        if cur.get("id") == req["id"] and cur.get("status") == "dismissed":
+        mine = cur.get("id") == req["id"]
+        if mine and cur.get("status") == "dismissed":
             return _out("dismissed", "The human dismissed the request without doing it. Ask them what they want.")
-        holder = bd.lease.get(profile_key=home).holder
-        if holder == bd.lease.HUMAN:
+        lease = bd.lease.get(profile_key=home)
+        if lease.holder == bd.lease.HUMAN:
             taken = True
-        elif taken:
+        elif taken or (mine and cur.get("status") == "done") or lease.epoch != epoch0:
+            # a take-over + hand-back can both happen between two polls: the hand-back marks the request done and
+            # every lease transition bumps the epoch, so neither is missed
             state.update_request(home, req["id"], status="done", done=time.time())
             return _out("completed", "The human did the step and handed control back. Take a fresh screenshot/snapshot "
                         "before continuing; the page has probably changed.")
@@ -117,5 +121,5 @@ def _handle(args: Dict[str, Any]) -> str:
         return _out("still_with_human", "The human took over but has not handed back yet. Tell the user you are waiting, "
                     "and stop; do not use screen tools until they hand back (they would be refused).")
     state.update_request(home, req["id"], status="expired")
-    return _out("timeout", f"Nobody took over within {wait}s. Tell the user what you need and that they can open the Hermes "
-                "dashboard -> Screen; then stop." + warn)
+    return _out("timeout", f"Nobody took over within {wait}s. Tell the user what you need and that they can open Screen "
+                "in hermes-webui or the Hermes dashboard; then stop." + warn)

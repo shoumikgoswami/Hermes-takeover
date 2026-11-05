@@ -389,6 +389,17 @@ class TestTool(Base):
         self.assertGreater(time.time() - t0, 2.5)
         self.assertEqual(core.state.get_request(HOME)["status"], "done")
 
+    def test_a_takeover_and_hand_back_between_two_polls_is_not_missed(self):
+        def quick():
+            time.sleep(1.3)
+            BD.lease.acquire("viewer-x", profile_key=HOME)
+            BD.lease.release(viewer_id="viewer-x", profile_key=HOME)      # back within a few ms: no poll sees "human"
+        threading.Thread(target=quick, daemon=True).start()
+        t0 = time.time()
+        out = self.call(reason="tick the box", wait_seconds=20)
+        self.assertEqual(out["status"], "completed", out)
+        self.assertLess(time.time() - t0, 5)
+
     def test_timeout_when_nobody_comes(self):
         out = self.call(reason="x", wait_seconds=2)
         self.assertEqual(out["status"], "timeout")
@@ -436,8 +447,47 @@ class TestTool(Base):
             def register_skill(s, name, path): s.skills.append((name, Path(path).exists()))
         c = Ctx()
         plugin_init.register(c)
-        self.assertEqual((c.tools, c.cli, c.cmds, c.skills, c.hooks), (["request_handoff"], ["handoff"], ["handoff"], [("handoff", True)], ["on_session_start"]))
+        self.assertEqual((c.tools, c.cli, c.cmds, c.skills, c.hooks), (["request_handoff"], ["handoff"], ["handoff"], [("handoff", True)], ["on_session_start", "pre_tool_call"]))
         self.assertEqual(core.tool.SCHEMA["parameters"]["required"], ["reason"])
+
+
+class TestFence(Base):
+    """The pre_tool_call veto that covers what Hermes's own fence does not (browser.cdp_url sessions, browser_cdp)."""
+    def setUp(self):
+        super().setUp()
+        self._cur, self._setting = core.compat.current_home, core.compat.setting
+        core.compat.current_home = lambda: HOME
+
+    def tearDown(self):
+        core.compat.current_home, core.compat.setting = self._cur, self._setting
+        BD.lease.release(profile_key=HOME)
+
+    def test_browser_and_screen_tools_pass_while_the_agent_holds_control(self):
+        for name in ("browser_navigate", "browser_cdp", "computer_use"):
+            self.assertIsNone(core.fence.check(tool_name=name))
+
+    def test_they_are_refused_while_a_human_holds_control(self):
+        BD.lease.acquire("viewer-x", profile_key=HOME)
+        for name in ("browser_navigate", "browser_snapshot", "browser_cdp", "browser_vision", "browser_type", "computer_use"):
+            v = core.fence.check(tool_name=name, args={})
+            self.assertEqual((v or {}).get("action"), "block", name)
+            self.assertIn("hand control back", v["message"])
+
+    def test_other_tools_and_request_handoff_are_never_blocked(self):
+        BD.lease.acquire("viewer-x", profile_key=HOME)
+        for name in ("request_handoff", "terminal", "read_file", "web_search", "clarify", ""):
+            self.assertIsNone(core.fence.check(tool_name=name), name)
+
+    def test_opt_out(self):
+        BD.lease.acquire("viewer-x", profile_key=HOME)
+        core.compat.setting = lambda k, d=None: False if k == "fence_browser_tools" else d
+        self.assertIsNone(core.fence.check(tool_name="browser_cdp"))
+
+    def test_the_registered_hook_is_the_fence(self):
+        BD.lease.acquire("viewer-x", profile_key=HOME)
+        self.assertEqual(plugin_init._pre_tool_call(tool_name="browser_cdp", args={}, task_id="t")["action"], "block")
+        BD.lease.release(profile_key=HOME)
+        self.assertIsNone(plugin_init._pre_tool_call(tool_name="browser_cdp", args={}, task_id="t"))
 
 
 class TestSetup(unittest.TestCase):

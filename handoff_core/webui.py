@@ -193,3 +193,11 @@ def integrate(home, force: bool = False) -> Dict[str, Any]:
         out["extension"] = install_extension(sd)
     out["sidecar"] = ensure_sidecar(home, restart=force)
     return out
+
+
+def orphan_cleanup() -> None:
+    """Called by the sidecar on its way out after the plugin was removed: take the WebUI extension with it."""
+    try:
+        uninstall_extension()
+    except Exception:  # noqa: BLE001
+        pass

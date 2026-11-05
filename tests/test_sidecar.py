@@ -160,6 +160,14 @@ class TestAuth(Base):
         self.assertEqual(self.req("POST", "/api/rfb/open", {"viewer_id": "aa.bb"})[1]["error"], "unknown_viewer")
         self.assertNotEqual(self.req("POST", "/api/viewer", {"viewer_id": "aa.bb"})[1]["viewer_id"], "aa.bb")
 
+    def test_a_bogus_content_length_is_refused_not_hung_on(self):
+        import http.client
+        for bad, want in (("-1", 400), ("abc", 400), (str(sc.MAX_SEND + 1), 413)):
+            c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            c.putrequest("POST", "/api/status"); c.putheader("Content-Length", bad); c.putheader(sc.HEADER, "test-token"); c.endheaders()
+            self.assertEqual(c.getresponse().status, want, bad)
+            c.close()
+
     def test_stream_calls_with_an_unknown_session_say_it_is_closed(self):
         st, h, _ = self.recv("nope")
         self.assertEqual((st, h.get("x-handoff-closed")), (404, str(sc.CLOSE_IDLE)))

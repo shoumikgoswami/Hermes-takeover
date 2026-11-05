@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import importlib
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 PLUGIN_ID = "handoff"
 
-_SUBMODULES = ("compat", "state", "setup", "tickets", "control", "bridge", "sidecar", "webui", "tool", "cli")
+_SUBMODULES = ("compat", "state", "setup", "tickets", "control", "bridge", "sidecar", "webui", "tool", "cli", "fence")
 
 
 def __getattr__(name):          # lazy: the CLI never needs the bridge, the bridge never needs argparse

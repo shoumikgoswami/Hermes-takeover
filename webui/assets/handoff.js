@@ -673,7 +673,7 @@
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
       mount(); wrapCore();
       window.__hermesHandoff = {
-        version: '0.1.0', open: () => onNavClick(true), close: () => window.switchPanel('chat'),
+        version: '0.2.0', open: () => onNavClick(true), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,
           err: S.err, closeCode: S.chan ? S.chan.closeCode : null,

@@ -34,6 +34,7 @@ from urllib.parse import parse_qs, urlsplit
 from . import PLUGIN_ID, __version__, compat, control, setup, state, tickets
 
 log = logging.getLogger("handoff.sidecar")
+PLUGIN_FILE = Path(__file__).resolve().parent.parent / "plugin.yaml"
 
 DEFAULT_PORT = 17901
 HEADER = "X-Hermes-Sidecar-Token"
@@ -237,6 +238,16 @@ class Sessions:
         touched = 0.0
         while True:
             time.sleep(2.0)
+            if not PLUGIN_FILE.exists():       # `hermes plugins remove handoff` deleted us: do not linger as an orphan
+                log.info("plugin removed; removing the WebUI extension and exiting")
+                try:
+                    from . import webui
+                    webui.orphan_cleanup()
+                except Exception:  # noqa: BLE001
+                    pass
+                for s in list(self.items.values()):
+                    s.close(CLOSE_SCREEN_OFF)
+                os._exit(0)
             now = time.monotonic()
             with self.lock:
                 dead = [s for s in self.items.values() if now - s.last_poll > IDLE_CLOSE]
@@ -370,9 +381,12 @@ def make_handler(app: App):
 
         def _run(self, method: str) -> None:
             u = urlsplit(self.path)
-            length = int(self.headers.get("Content-Length") or 0)
-            if length > MAX_SEND:
-                self.send_error(413)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = -1
+            if length < 0 or length > MAX_SEND:
+                self.send_error(400 if length < 0 else 413)
                 self.close_connection = True
                 return
             body = self.rfile.read(length) if length else b""
