@@ -1,0 +1,54 @@
+"""``hermes handoff <status|setup|release|screen>``."""
+from __future__ import annotations
+
+import json
+import sys
+
+from . import compat, control, setup
+
+
+def setup_parser(sub) -> None:
+    s = sub.add_subparsers(dest="handoff_cmd")
+    p = s.add_parser("status", help="Readiness, screen, who holds control, pending request")
+    p.add_argument("--json", action="store_true")
+    s.add_parser("setup", help="Install what Handoff needs (TigerVNC/Xfce, headed browser); safe to re-run")
+    s.add_parser("screen", help="Start the agent's screen now")
+    s.add_parser("release", help="Force control back to the agent (e.g. after closing a tab mid-takeover)")
+    sub.set_defaults(func=run)
+
+
+def run(args) -> int:
+    cmd = getattr(args, "handoff_cmd", None) or "status"
+    try:
+        home = compat.current_home()
+        if cmd == "setup":
+            res = setup.run_setup(home, on_line=lambda l: print("  " + l, flush=True))
+            print(f"setup: {res['state']}" + (f" - {res['error']}" if res.get("error") else ""))
+            return 0 if res["state"] == "done" else 1
+        if cmd == "screen":
+            setup.ensure_ready(home)
+            print(json.dumps(control.start_screen(home)))
+            return 0
+        if cmd == "release":
+            print(json.dumps(control.force_hand_back(home)["holder"]))
+            return 0
+        st = control.status(home, None)
+        if getattr(args, "json", False):
+            print(json.dumps(st, indent=2, default=str))
+            return 0
+        r, sc, ls, rq = st["readiness"], st["screen"], st["lease"], st["request"]
+        print(f"Handoff {st['version']}  (home: {home})")
+        print(f"  ready:    {'yes' if r['ready'] else 'NO'}"
+              + ("" if r["ready"] else f"  missing={r['missing']} tigervnc={r['xvnc_tigervnc']}"))
+        print(f"  headed:   {r['headed']}   screen: {'running' if sc.get('running') else 'off'}")
+        print(f"  control:  {ls['holder']}" + (f" ({ls['reason']})" if ls.get("reason") else ""))
+        print(f"  request:  {rq['reason'] + ' [' + rq['status'] + ']' if rq else '-'}")
+        if not r["ready"]:
+            print("  fix:      hermes handoff setup" + (f"   (or: {r['install_command']})" if r.get("install_command") else ""))
+        return 0
+    except compat.Incompatible as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1

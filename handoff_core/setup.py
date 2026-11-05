@@ -1,0 +1,256 @@
+"""First-run setup: make this host able to show the agent's screen, without the user doing anything.
+
+What Handoff needs that a stock Hermes host may lack:
+
+1. the Bot Desktop packages (TigerVNC + Xfce) - installed through Hermes's own installer
+   (``tools.bot_desktop.install``), which needs root: passwordless sudo, or you run the printed command;
+2. **TigerVNC specifically**: a TightVNC ``Xvnc`` is on PATH on many images and passes the "binary exists"
+   check, but cannot do ``-rfbunixpath``, so the screen would never start. Detected and fixed here;
+3. ``browser.headed: true`` so the agent's Chrome opens on that screen (set with Hermes's config API).
+
+There are no extra Python dependencies: FastAPI/websockets come with the dashboard, noVNC ships in the
+plugin. Setup runs automatically once on first use (opt out: ``plugins.entries.handoff.settings.auto_install: false``)
+and again on demand (``hermes handoff setup``, the Screen tab's button, or the agent tool).
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+from . import PLUGIN_ID, __version__, compat, state
+
+MAX_LINES = 80
+_xvnc_cache: Dict[str, Any] = {}
+_sudo_cache: Dict[str, Any] = {"at": 0.0, "ok": False}
+_threads: Dict[str, threading.Thread] = {}
+_threads_lock = threading.Lock()
+
+
+# ── probes ────────────────────────────────────────────────────────────────────
+def xvnc_is_tigervnc() -> bool:
+    path = shutil.which("Xvnc")
+    if not path:
+        return False
+    try:
+        real = os.path.realpath(path)
+        key = f"{real}:{os.stat(real).st_mtime_ns}"
+    except OSError:
+        return False
+    if _xvnc_cache.get("key") == key:
+        return bool(_xvnc_cache["ok"])
+    try:
+        out = subprocess.run([path, "-version"], capture_output=True, text=True, timeout=5)
+        ok = "tigervnc" in (out.stdout + out.stderr).lower()
+    except Exception:  # noqa: BLE001
+        ok = False
+    _xvnc_cache.update(key=key, ok=ok)
+    return ok
+
+
+def sudo_without_password() -> bool:
+    if time.time() - _sudo_cache["at"] < 30:
+        return bool(_sudo_cache["ok"])
+    ok = False
+    if shutil.which("sudo"):
+        try:
+            ok = subprocess.run(["sudo", "-n", "true"], capture_output=True, timeout=3,
+                                stdin=subprocess.DEVNULL).returncode == 0
+        except Exception:  # noqa: BLE001
+            ok = False
+    elif os.geteuid() == 0:
+        ok = True
+    _sudo_cache.update(at=time.time(), ok=ok)
+    return ok
+
+
+def browser_headed() -> Optional[bool]:
+    try:
+        from hermes_cli.config import load_config_readonly
+        return bool((load_config_readonly().get("browser") or {}).get("headed"))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def manual_command() -> Optional[str]:
+    bd = compat.load()
+    cmd = bd.runtime.install_command()
+    if cmd and not xvnc_is_tigervnc() and shutil.which("Xvnc") and "apt" in cmd:
+        cmd += " && sudo update-alternatives --set Xvnc /usr/bin/Xtigervnc"
+    return cmd
+
+
+# ── readiness ─────────────────────────────────────────────────────────────────
+def readiness(home) -> Dict[str, Any]:
+    bd = compat.load()
+    rt = bd.runtime
+    with compat.home_scope(home):
+        supported = rt.is_supported_host()
+        missing: List[str] = rt.missing_binaries() if supported else []
+        tiger = xvnc_is_tigervnc() if (supported and "Xvnc" not in missing) else False
+        ready = bool(supported and not missing and tiger)
+        out: Dict[str, Any] = {
+            "supported": supported, "missing": missing, "xvnc_tigervnc": tiger, "ready": ready,
+            "headed": browser_headed(), "running": bool(rt.is_running()) if supported else False,
+            "can_install": bool(supported and sudo_without_password()),
+        }
+        if supported and not ready:
+            out["install_command"] = manual_command()
+        return out
+
+
+def setup_state(home) -> Dict[str, Any]:
+    s = state.read_json(state.data_dir(home) / "setup.json") or {}
+    if s.get("state") == "running" and not _alive(s.get("pid")):
+        s["state"] = "failed"
+        s["error"] = s.get("error") or "setup was interrupted"
+    s.setdefault("state", "idle")
+    s.setdefault("lines", [])
+    s["auto_allowed"] = bool(compat.setting("auto_install", True))
+    s["attempted"] = bool(s.get("attempted_version"))
+    return s
+
+
+def _alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (TypeError, ValueError, OSError):
+        return False
+
+
+def _save(home, s: Dict[str, Any]) -> None:
+    s = {k: v for k, v in s.items() if k not in ("auto_allowed", "attempted")}
+    s["lines"] = s.get("lines", [])[-MAX_LINES:]
+    state.write_json(state.data_dir(home) / "setup.json", s)
+
+
+# ── running setup ─────────────────────────────────────────────────────────────
+def run_setup(home, on_line: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
+    """Blocking. Idempotent and safe to call from several processes at once (file lock)."""
+    import fcntl
+    bd = compat.load()
+    lock_path = state.data_dir(home) / "setup.lock"
+    fh = open(lock_path, "a+")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return setup_state(home)             # someone else is already running it
+    s: Dict[str, Any] = {"state": "running", "pid": os.getpid(), "started": time.time(), "lines": [],
+                         "attempted_version": __version__, "error": None, "manual_command": None}
+
+    def line(text: str) -> None:
+        text = (text or "").rstrip()
+        if not text:
+            return
+        s["lines"].append(text[:300])
+        if len(s["lines"]) % 5 == 0:
+            _save(home, s)
+        if on_line:
+            on_line(text)
+
+    try:
+        _save(home, s)
+        with compat.home_scope(home):
+            _run(bd, s, line)
+    except Exception as exc:  # noqa: BLE001
+        s.update(state="failed", error=f"{type(exc).__name__}: {exc}"[:400])
+        line(f"setup failed: {s['error']}")
+    finally:
+        s["finished"] = time.time()
+        _save(home, s)
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        fh.close()
+    return setup_state(home)
+
+
+def _run(bd, s: Dict[str, Any], line: Callable[[str], None]) -> None:
+    rt = bd.runtime
+    if not rt.is_supported_host():
+        s.update(state="failed", error="Handoff needs a Linux host (Bot Desktop is Linux-only).")
+        line(s["error"])
+        return
+
+    # 1. packages (+ make sure Xvnc is TigerVNC)
+    if rt.missing_binaries() or not xvnc_is_tigervnc():
+        line("Installing the screen packages (TigerVNC, Xfce)…")
+        code = bd.install.install_packages(ask_password=lambda: "", on_line=line, timeout_seconds=900.0)
+        if code == 0 and shutil.which("Xvnc") and not xvnc_is_tigervnc():
+            line("Switching Xvnc to TigerVNC…")
+            subprocess.run(["sudo", "-n", "update-alternatives", "--set", "Xvnc", "/usr/bin/Xtigervnc"],
+                           capture_output=True, timeout=30)
+            _xvnc_cache.clear()
+        if code != 0 or rt.missing_binaries() or not xvnc_is_tigervnc():
+            cmd = manual_command()
+            reason = ("needs a sudo password" if code == -1 else
+                      "has no sudo" if code == bd.install.NO_SUDO else f"installer exited with {code}")
+            s.update(state="needs_manual", manual_command=cmd,
+                     error=f"Could not install automatically ({reason}). Run this on the server, then retry: {cmd}")
+            line(s["error"])
+            return
+        line("Screen packages installed.")
+    else:
+        line("Screen packages already installed.")
+
+    # 2. the agent's Chrome must open on that screen
+    if not browser_headed():
+        line("Enabling browser.headed so the agent's Chrome opens on the screen…")
+        try:
+            from hermes_cli.config import set_config_value
+            set_config_value("browser.headed", "true")
+        except (SystemExit, Exception) as exc:  # noqa: BLE001 - managed installs refuse config writes
+            line(f"Could not set browser.headed automatically ({type(exc).__name__}). Run: hermes config set browser.headed true")
+    s.update(state="done", error=None, manual_command=None)
+    line("Setup complete.")
+
+
+def start_async(home) -> bool:
+    """Run setup in a background thread of this process. False if one is already running here."""
+    home = str(home)
+    with _threads_lock:
+        t = _threads.get(home)
+        if t and t.is_alive():
+            return False
+        t = threading.Thread(target=run_setup, args=(home,), name="handoff-setup", daemon=True)
+        _threads[home] = t
+        t.start()
+        return True
+
+
+def maybe_auto_setup(home) -> Dict[str, Any]:
+    """First run: kick setup off once, automatically, when needed and allowed. Never loops: after one attempt
+    (whatever its outcome) only an explicit request runs it again."""
+    r = readiness(home)
+    s = setup_state(home)
+    if (not r["ready"] and r["supported"] and s["auto_allowed"] and not s["attempted"]
+            and s["state"] not in ("running",)):
+        start_async(home)
+        s = setup_state(home)
+    return s
+
+
+def ensure_ready(home, timeout: float = 600.0) -> Dict[str, Any]:
+    """For the agent tool: return a ready ``readiness`` or raise ``RuntimeError`` with what the user must do."""
+    r = readiness(home)
+    if r["ready"]:
+        return r
+    if not r["supported"]:
+        raise RuntimeError("Handoff needs a Linux host with Bot Desktop; this host is not supported.")
+    if not compat.setting("auto_install", True) and setup_state(home)["state"] != "running":
+        raise RuntimeError("Handoff is not set up and auto_install is off. Run: hermes handoff setup")
+    start_async(home)
+    end = time.time() + timeout
+    while time.time() < end:
+        time.sleep(1)
+        s = setup_state(home)
+        if s["state"] in ("done", "failed", "needs_manual"):
+            break
+    r = readiness(home)
+    if r["ready"]:
+        return r
+    s = setup_state(home)
+    raise RuntimeError(s.get("error") or "Handoff setup is still running; try again in a minute.")

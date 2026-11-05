@@ -1,0 +1,17 @@
+{
+  "name": "handoff",
+  "label": "Screen",
+  "description": "See and take over the agent's browser; hand control back when you are done.",
+  "icon": "Eye",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/handoff",
+    "position": "after:sessions"
+  },
+  "slots": [
+    "header-banner"
+  ],
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
