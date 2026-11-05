@@ -152,6 +152,10 @@
           this.retry = 0; this.retried401 = false;
           this.set({ connected: true, connecting: false, note: "" });
           this.applyInput();
+          if (/[?&]take=1\b/.test(location.search)) {          // one tap from the banner: take control as soon as it is live
+            history.replaceState(null, "", location.pathname);
+            if (!this.s.mine) this.takeOver();
+          }
         });
         rfb.addEventListener("disconnect", () => setTimeout(() => this.onClosed(gen), 0));
       } catch (e) {
@@ -457,7 +461,9 @@
     if (!(req && req.status === "pending") && !mine) return null;
     return h("div", { className: "hdo-global" + (mine ? " hdo-global-me" : "") },
       mine ? "You still have control of the agent's screen. " : [h("b", { key: "b" }, "The agent needs you: "), req.reason + " "],
-      h("a", { href: BASE + "/takeover" }, mine ? "Open Screen to hand back" : "Open Screen"));
+      mine ? h("a", { href: BASE + "/takeover" }, "Open Screen to hand back")
+           : [h("a", { key: "t", href: BASE + "/takeover?take=1", className: "hdo-global-take" }, "Take over"), " ",
+              h("a", { key: "w", href: BASE + "/takeover" }, "Just watch")]);
   }
 
   reg.register("takeover", ScreenPage);

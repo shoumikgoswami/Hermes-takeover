@@ -319,6 +319,21 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("force hand-back: agent resumes", L.get().holder == "agent")
     D.screenshot(f"{SHOTS}/9-forced.png")
 
+    # ── one tap: the agent asks again, the user taps "Take over" in the banner on the chat page ──
+    box2 = []; t2 = threading.Thread(target=run_tool, args=({"reason": "Approve the Hermes app on GitHub", "wait_seconds": 90}, box2)); t2.start()
+    E = page(chrome)                                    # an ordinary WebUI page (chat), Screen not open
+    E.wait("!!document.querySelector('.hdo-global-take') && !document.querySelector('.hdo-global').hidden", 40)
+    check("the banner on the chat page offers a one-tap Take over", "Approve the Hermes app" in E.eval("document.querySelector('.hdo-global').textContent"))
+    E.screenshot(f"{SHOTS}/10-one-tap-banner.png")
+    E.eval("document.querySelector('.hdo-global-take').click()")
+    E.wait("window.__hermesTakeover.state().mine && window.__hermesTakeover.state().inputOn", 40)
+    check("one tap opens Screen AND takes control (no second tap)", L.get().holder == "human" and E.eval("window.__hermesTakeover.state().active"))
+    E.screenshot(f"{SHOTS}/11-one-tap-driving.png")
+    clk(E, "#mainTakeover [data-f=back]"); t2.join(60)
+    out2 = json.loads(box2[0]) if box2 and box2[0].startswith("{") else {"status": str(box2)}
+    check("...and handing back completes that request", out2.get("status") == "completed", str(out2))
+    E.call("Page.close")
+
     # ── hiding the page stops the stream; no session leak on the sidecar ──
     js(A, "window.__hermesTakeover.close()")
     time.sleep(8)

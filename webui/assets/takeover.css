@@ -67,3 +67,7 @@ main.main.showing-x-takeover > #mainTakeover { display: flex; }
 .hdo-tap-hold { border-color: #3fb950; background: rgba(63,185,80,.4); }
 .hdo-dragging { outline: 2px solid #3fb950; outline-offset: -2px; }
 @keyframes hdo-tap { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.5); opacity: 0; } }
+
+.hdo-global-take { margin-left: 6px; padding: 5px 14px; border-radius: 999px; border: 0; font-weight: 700; cursor: pointer;
+  background: #1f6feb; color: #fff; font-size: 14px; }
+.hdo-global-take:active { transform: scale(.97); }

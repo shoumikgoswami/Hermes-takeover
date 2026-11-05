@@ -4,12 +4,13 @@ Two documented plugin surfaces, no core patching:
 
 * a cache-safe **system prompt section** (``ctx.register_system_prompt_section``): standing guidance, frozen into each
   new session, that CAPTCHAs, logins, 2FA codes and payments are the user's job and ``request_takeover`` is how to ask;
-* a ``transform_tool_result`` hook: when a browser tool's result shows a CAPTCHA / "verify you are human" wall or a
-  one-time-code prompt, a short hint is attached to that result telling the agent to call ``request_takeover`` instead
-  of trying to solve, bypass or guess it. At most once per conversation and kind every few minutes, and never while the
+* a ``transform_tool_result`` hook: when a browser tool's result shows a step only the user should do (a password /
+  sign-in form, an "Authorize app" / "Allow access" consent, a 2FA / device approval prompt, a payment form, or a
+  CAPTCHA wall), a short hint is attached to that result telling the agent to call ``request_takeover`` instead of
+  doing it, bypassing it or guessing. At most once per conversation and kind every few minutes, and never while the
   user already holds the screen or a request is already open.
 
-Opt out of the hint with ``plugins.entries.takeover.settings.captcha_hints: false``.
+Opt out of the hint with ``plugins.entries.takeover.settings.takeover_hints: false``.
 """
 from __future__ import annotations
 
@@ -23,21 +24,24 @@ from . import compat, state
 
 SECTION_ID = "takeover.hand-over-to-user"
 
-GUIDANCE = """You can hand the screen to the user with the `request_takeover` tool.
-Use it when the page in your browser needs something only the user should do:
-- a CAPTCHA, "verify you are human" / "I'm not a robot" check, or bot wall (Cloudflare, reCAPTCHA, hCaptcha, Turnstile)
-- a login password, 2FA / SMS / authenticator code, passkey, or device approval
-- a payment, card entry, or an irreversible confirmation the user should own
-Never try to solve, bypass or guess these, and never ask the user to paste a password, code or card number into chat.
-Call `request_takeover(reason="<exactly what to do, e.g. Solve the CAPTCHA on the Reddit login page>")`. The user opens
-the Screen page (hermes-webui or the Hermes dashboard, works on a phone), taps Take over, does the step in YOUR browser
-and hands back. The call waits for that; on `completed`, take a fresh snapshot and continue. On `timeout`,
-`still_with_human` or `dismissed`, tell the user plainly what you are waiting for and stop the turn."""
+GUIDANCE = """You can hand your browser screen to the user with the `request_takeover` tool; they get a one-tap
+"Take over" button (hermes-webui or the Hermes dashboard, also on their phone).
+Call it whenever the next step on screen is one only the user should do, for example:
+- typing credentials: a password, sign-in form, passkey, or account recovery
+- approving or authorizing: an "Authorize app" / "Allow access" / OAuth consent screen, "Approve sign-in", device approval
+- a 2FA / SMS / authenticator / email code
+- a CAPTCHA, "verify you are human" check or bot wall
+- a payment, card entry, or another irreversible confirmation the user should own
+Never type, guess, solve or bypass these yourself, and never ask the user to paste a password, code or card number into
+chat. Call `request_takeover(reason="<exactly what to do, e.g. Sign in to GitHub and approve the Hermes app>")`. The
+call waits until they hand back; on `completed`, take a fresh snapshot and continue. On `timeout`, `still_with_human`
+or `dismissed`, tell the user plainly what you are waiting for and stop the turn."""
 
 # Only browser tools that return page content. computer_use returns pixels, browser_cdp returns raw protocol data.
 WATCHED = frozenset({"browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_press",
                      "browser_back", "browser_scroll", "browser_vision", "browser_exec", "browser_console"})
 
+# Most specific first: a sign-in page that also carries reCAPTCHA is reported as the CAPTCHA.
 _CAPTCHA = re.compile(
     r"re-?captcha|h-?captcha|cf-turnstile|challenges\.cloudflare\.com|verify (?:that )?you(?:'| a)re (?:a )?human"
     r"|i'?m not a robot|i am not a robot|are you a robot|unusual traffic from your|checking if the site connection is secure"
@@ -47,6 +51,26 @@ _CODE = re.compile(
     r"enter (?:the|your) (?:\d-digit |6-digit |verification |security |one-time )?code|verification code|one-time (?:code|password|passcode)"
     r"|two-factor|2-step verification|two-step verification|authenticator app|we (?:just )?sent (?:you )?a code"
     r"|security code (?:sent|we sent)|enter the otp|\botp\b", re.I)
+
+_AUTHORIZE = re.compile(
+    r"button \"(?:authorize|allow|approve|grant access|accept and continue)\b|wants to access your|is requesting (?:access|permission)"
+    r"|would like (?:to access|permission)|requesting permission to|grant (?:\S+ )?access|allow access|authorize (?:\S+ ){0,3}(?:app|application|access)"
+    r"|approve (?:this |the )?sign-?in|approve (?:this |the )?request|confirm (?:it'?s|it is) you|device approval|check your phone|tap yes on"
+    r"|is this you trying to sign in", re.I)
+_CREDENTIALS = re.compile(
+    r"textbox \"[^\"\n]{0,40}password|type=[\"']?password|enter your password|forgot (?:your )?password|use (?:a |your )?passkey"
+    r"|sign in with (?:a )?passkey|textbox \"[^\"\n]{0,40}(?:username|email or phone)", re.I)
+_PAYMENT = re.compile(
+    r"card number|name on card|expiry date|expiration date|\bcvv\b|\bcvc\b|billing address|button \"(?:pay|place order|buy now|complete purchase|confirm payment)\b",
+    re.I)
+KINDS = (("captcha", _CAPTCHA), ("code", _CODE), ("authorize", _AUTHORIZE), ("payment", _PAYMENT), ("credentials", _CREDENTIALS))
+WHAT = {
+    "captcha": ("a CAPTCHA / human-verification check", "Solve the CAPTCHA on this page"),
+    "code": ("a one-time code / 2-step verification prompt", "Enter the verification code on this page"),
+    "authorize": ("an approval / authorization screen (consent, \"Allow access\", sign-in approval)", "Review and approve the access request on this page"),
+    "payment": ("a payment / card form", "Enter the payment details and confirm"),
+    "credentials": ("a sign-in form asking for credentials", "Sign in on this page"),
+}
 
 COOLDOWN = 300.0
 MAX_SCAN = 400_000
@@ -66,20 +90,17 @@ def guidance(_session_info: Any = None) -> str:
 def detect(text: str) -> Optional[Tuple[str, str]]:
     """``(kind, matched)`` for a human-only wall in ``text``, else None."""
     t = text[:MAX_SCAN]
-    m = _CAPTCHA.search(t)
-    if m:
-        return "captcha", m.group(0)
-    m = _CODE.search(t)
-    if m:
-        return "code", m.group(0)
+    for kind, rx in KINDS:
+        m = rx.search(t)
+        if m:
+            return kind, m.group(0)
     return None
 
 
 def _message(kind: str, matched: str) -> str:
-    what = ("a CAPTCHA / human-verification check" if kind == "captcha" else "a one-time code / 2-step verification prompt")
-    example = "Solve the CAPTCHA on this page" if kind == "captcha" else "Enter the verification code on this page"
-    return (f"[Takeover] This page appears to show {what} (matched: {matched!r}). Do not try to solve, bypass or guess it and "
-            f"do not ask for the code in chat. Call request_takeover(reason=\"{example} ...\") so the user can do it on the "
+    what, example = WHAT[kind]
+    return (f"[Takeover] This page appears to show {what} (matched: {matched!r}). That is the user's step: do not fill it in, "
+            f"solve, approve, bypass or guess it, and do not ask for passwords or codes in chat. Call request_takeover(reason=\"{example} ...\") so the user can do it on the "
             f"Screen page, then continue when it returns 'completed'. Ignore this hint if the page does not actually need the user.")
 
 
@@ -107,7 +128,7 @@ def transform(tool_name: str = "", result: Any = None, task_id: str = "", sessio
     try:
         if tool_name not in WATCHED or not isinstance(result, str) or not result:
             return None
-        if not compat.setting("captcha_hints", True):
+        if not compat.setting("takeover_hints", True):
             return None
         hit = detect(result)
         if not hit:

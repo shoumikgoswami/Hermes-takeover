@@ -13,9 +13,10 @@ DEFAULT_WAIT, MAX_WAIT = 900, 3600
 SCHEMA = {
     "name": NAME,
     "description": (
-        "Ask the human to take over the browser/desktop screen for a step only they can do: a login, password, 2FA/SMS "
-        "code, CAPTCHA, payment, or an unexpected consent page. The user sees your request on the Screen page of "
-        "hermes-webui or the Hermes dashboard (also on their phone), taps Take over, does the step in the SAME browser you are using, then hands "
+        "Ask the human to take over the browser/desktop screen for any step only they should do: typing credentials "
+        "(password, sign-in, passkey), approving or authorizing something (OAuth consent, 'Allow access', sign-in or device "
+        "approval), a 2FA/SMS/email code, a CAPTCHA or bot check, a payment, or an unexpected consent page. The user sees your request on the Screen page of "
+        "hermes-webui or the Hermes dashboard (also on their phone), taps the one-tap Take over button, does the step in the SAME browser you are using, then hands "
         "control back. This call WAITS until they have handed back (default up to 15 minutes), so you do not need to "
         "ask them to say 'done'. While they hold control, all your screen/browser tools are refused. Never ask the user "
         "to type secrets into chat; use this instead. After it returns 'completed', take a fresh screenshot/snapshot "
@@ -91,7 +92,7 @@ def _handle(args: Dict[str, Any]) -> str:
     epoch0 = bd.lease.get(profile_key=home).epoch
     req = state.create_request(home, reason)
     if wait == 0:
-        return _out("requested", "Request posted on the Screen page. Stop and tell the user to open Screen -> Take over, "
+        return _out("requested", "Request posted. Stop and tell the user to tap Take over in the banner (or open Screen), "
                     "do the step, then Hand back." + warn)
 
     from tools import interrupt

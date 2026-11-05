@@ -479,6 +479,7 @@
         syncFb();
         S.connected = true; S.connecting = false; S.retry = 0; S.retried = false; S.note = '';
         applyInput(); render();
+        if (S.autoTake && Date.now() - S.autoTake < 60000) { S.autoTake = 0; takeOver(); }   // the one-tap "Take over"
       });
       rfb.addEventListener('disconnect', () => setTimeout(() => onClosed(gen), 0));
     } catch (e) {
@@ -647,10 +648,17 @@
           G.el.textContent = '';
           const msg = document.createElement('span');
           msg.textContent = mine ? 'You still have control of the agent\'s screen. ' : 'The agent needs you: ' + req.reason + ' ';
-          const a = document.createElement('button'); a.type = 'button'; a.className = 'hdo-link';
-          a.textContent = mine ? 'Open Screen to hand back' : 'Open Screen';
-          a.addEventListener('click', () => onNavClick(true));
-          G.el.appendChild(msg); G.el.appendChild(a); G.el.hidden = false;
+          const a = document.createElement('button'); a.type = 'button';
+          a.className = mine ? 'hdo-link' : 'hdo-global-take'; a.dataset.f = 'globalTake';
+          a.textContent = mine ? 'Open Screen to hand back' : 'Take over';
+          a.addEventListener('click', () => (mine ? onNavClick(true) : takeOverFromAnywhere()));
+          G.el.appendChild(msg); G.el.appendChild(a);
+          if (!mine) {
+            const w = document.createElement('button'); w.type = 'button'; w.className = 'hdo-link'; w.textContent = 'Just watch';
+            w.addEventListener('click', () => onNavClick(true));
+            G.el.appendChild(document.createTextNode(' ')); G.el.appendChild(w);
+          }
+          G.el.hidden = false;
           // sit just below WebUI's titlebar so the menu / title stay usable
           const bar = document.querySelector('.app-titlebar') || (document.getElementById('appTitlebarTitle') || {}).parentElement;
           const bottom = bar && bar.getBoundingClientRect ? bar.getBoundingClientRect().bottom : 0;
@@ -664,6 +672,14 @@
     setTimeout(globalTick, G.delay);
   }
 
+  /** One tap from any WebUI page (banner, or a link to #takeover): open Screen and take control as soon as it is live. */
+  async function takeOverFromAnywhere() {
+    S.autoTake = Date.now();
+    if (G.el) G.el.hidden = true;
+    await onNavClick(true);
+    if (S.connected && !S.mine) { S.autoTake = 0; takeOver(); }
+  }
+
   // ── boot ──────────────────────────────────────────────────────────────────
   document.addEventListener('visibilitychange', () => { if (S.active && !document.hidden) schedule(0); });
   window.addEventListener('pagehide', () => { try { if (S.chan) S.chan.close(); } catch (_) { /* ignore */ } });
@@ -673,13 +689,17 @@
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
       mount(); wrapCore();
       window.__hermesTakeover = {
-        version: '0.3.0', open: () => onNavClick(true), close: () => window.switchPanel('chat'),
+        version: '0.3.0', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,
           err: S.err, closeCode: S.chan ? S.chan.closeCode : null,
           lease: S.status && S.status.lease ? { holder: S.status.lease.holder, mine: S.status.lease.mine } : null }),
       };
       setTimeout(globalTick, 1500);
+      if (location.hash === '#takeover') {                 // a link the agent or a notification can point at
+        history.replaceState(null, '', location.pathname + location.search);
+        takeOverFromAnywhere();
+      }
       return;
     }
     if (attempt < 100) setTimeout(() => install(attempt + 1), 150);

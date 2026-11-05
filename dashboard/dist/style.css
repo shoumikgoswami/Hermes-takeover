@@ -43,3 +43,5 @@
 .hdo-global a { color: inherit; font-weight: 700; text-decoration: underline; }
 .hdo-global-me { background: var(--color-success, #3fb950); }
 @media (max-width: 640px) { .hdo-stage { min-height: 300px; } }
+
+.hdo-global-take { margin-left: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 700; background: #1f6feb; color: #fff !important; text-decoration: none; }

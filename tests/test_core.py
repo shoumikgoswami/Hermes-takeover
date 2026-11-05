@@ -513,7 +513,7 @@ class TestNudge(Base):
 
     def test_guidance_names_the_tool_and_the_cases(self):
         g = core.nudge.guidance({})
-        for needle in ("request_takeover", "CAPTCHA", "2FA", "never ask the user to paste"):
+        for needle in ("request_takeover", "CAPTCHA", "2FA", "Authorize", "password", "never ask the user to paste", "one-tap"):
             self.assertIn(needle.lower(), g.lower())
         self.assertLessEqual(len(g), 2000)
 
@@ -524,9 +524,16 @@ class TestNudge(Base):
             self.assertEqual((core.nudge.detect(page) or ("",))[0], "captcha", page)
         for page in ("Enter the 6-digit code we sent to +1 *** 12", "2-Step Verification", "Open your authenticator app"):
             self.assertEqual((core.nudge.detect(page) or ("",))[0], "code", page)
+        for page in ('- button "Authorize hermes-app" [ref=e9]', "Hermes Agent wants to access your Google Account",
+                     '- button "Allow" [ref=e3]', "Approve sign-in request", "Check your phone. Tap Yes on the notification"):
+            self.assertEqual((core.nudge.detect(page) or ("",))[0], "authorize", page)
+        for page in ('- textbox "Password" [ref=e5]', '<input type="password" name="pw">', "Sign in with a passkey"):
+            self.assertEqual((core.nudge.detect(page) or ("",))[0], "credentials", page)
+        for page in ('- textbox "Card number"', '- button "Place order" [ref=e2]'):
+            self.assertEqual((core.nudge.detect(page) or ("",))[0], "payment", page)
 
     def test_ordinary_pages_are_left_alone(self):
-        for page in ("r/AskReddit - What is a skill everyone should learn?", "Sign in to GitHub - Username or email",
+        for page in ("r/AskReddit - What is a skill everyone should learn?", '- link "Sign in" [ref=e1]', "Allowances and grants 2026",
                      "The Captchas Of Old - a history (no)" .replace("Captchas", "Puzzles"), ""):
             self.assertIsNone(self.t(page), page)
 
@@ -554,7 +561,7 @@ class TestNudge(Base):
         for tool in ("terminal", "read_file", "web_extract", "computer_use", "browser_cdp", "request_takeover"):
             self.assertIsNone(self.t("reCAPTCHA", tool=tool), tool)
         saved = core.compat.setting
-        core.compat.setting = lambda k, d=None: False if k == "captcha_hints" else d
+        core.compat.setting = lambda k, d=None: False if k == "takeover_hints" else d
         try: self.assertIsNone(self.t("reCAPTCHA", sid="s9"))
         finally: core.compat.setting = saved
 

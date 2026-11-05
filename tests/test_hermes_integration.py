@@ -75,9 +75,10 @@ class TestThroughHermes(unittest.TestCase):
 
     def test_tool_is_registered_in_hermes_registry(self):
         from tools.registry import registry
-        names = set(getattr(registry, "_tools", {}) or {}) or {getattr(t, "name", "") for t in registry.get_all_tools()} \
-            if hasattr(registry, "get_all_tools") else set(getattr(registry, "_tools", {}))
-        self.assertIn("request_takeover", names)
+        from hermes_constants import get_hermes_home
+        e = registry.get_entry("request_takeover", scope=str(get_hermes_home())) or registry.get_entry("request_takeover")
+        self.assertIsNotNone(e, "request_takeover not in Hermes's tool registry")
+        self.assertEqual(e.toolset, "takeover")
 
 
 if __name__ == "__main__":
