@@ -2,21 +2,23 @@
 
 hermes-webui is a different app from ``hermes dashboard``. It loads *extensions* (front-end files from
 ``<state>/extensions/<id>/``) and reaches backends only through a loopback sidecar behind its authenticated proxy.
-This module does both halves for the user, with no manual steps beyond WebUI's own one-click consent:
+This module does both halves for the user, with no manual steps:
 
 * ``install_extension``  copy the bundled extension into WebUI's extension dir and record it exactly like the
                          WebUI gallery does (loads on the next page render; no WebUI restart)
 * ``ensure_sidecar``     start ``takeover_core.sidecar`` detached if it is not already answering on 127.0.0.1:17901
-* ``integrate``          detect WebUI; do both; called automatically on first agent session and by ``hermes takeover setup``
+* ``integrate``          detect WebUI; do both; called automatically right after install and by ``hermes takeover setup``
 
 WebUI state dir: ``$HERMES_WEBUI_STATE_DIR`` (set whenever WebUI itself runs the agent), else ``~/.hermes/webui``.
-Consent (Settings -> Extensions -> Diagnostics -> Loopback sidecars -> Takeover -> Approve) is WebUI's security
-decision and is deliberately left to the user; it requires WebUI authentication to be on (token-v1).
+WebUI's sidecar consent (Settings -> Extensions -> Diagnostics) is granted ONCE by the page itself through WebUI's
+own endpoint (enabling the plugin is the consent; opt out with ``webui_auto_approve: false``); WebUI still requires
+authentication to be on (token-v1). A later revoke sticks (``AUTOCONSENT_RECORD``).
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -127,13 +129,66 @@ def uninstall_extension(sd: Optional[Path] = None) -> bool:
 
 
 # ── sidecar process ───────────────────────────────────────────────────────────
+def listener_uid(p: int) -> Optional[int]:
+    """UID owning the socket LISTENing on 127.0.0.1:<p> (from /proc/net/tcp), None if nobody / unknown."""
+    want = "0100007F:%04X" % p
+    try:
+        with open("/proc/net/tcp", encoding="ascii") as fh:
+            next(fh)
+            for line in fh:
+                f = line.split()
+                if len(f) > 7 and f[1] == want and f[3] == "0A":
+                    return int(f[7])
+    except (OSError, ValueError, StopIteration):
+        pass
+    return None
+
+
+def port_owner_ok() -> bool:
+    """Is whatever listens on our port running as this user? Another local user squatting the fixed loopback port
+    would otherwise receive the keystrokes WebUI's proxy forwards (passwords typed during a takeover)."""
+    uid = listener_uid(port())
+    return uid is None or uid == os.getuid()
+
+
 def health(timeout: float = 1.5) -> Optional[Dict[str, Any]]:
+    """The running sidecar's /health, but only if it is ours (same UID)."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port()}/health", timeout=timeout) as r:
             d = json.loads(r.read())
-            return d if d.get("service") == PLUGIN_ID else None
     except Exception:  # noqa: BLE001
         return None
+    if d.get("service") != PLUGIN_ID or not port_owner_ok():
+        return None
+    return d
+
+
+def _is_our_sidecar(pid: int) -> bool:
+    """Only ever signal a process that is ours AND is a Takeover sidecar (pids get reused; a pidfile goes stale)."""
+    try:
+        if os.stat(f"/proc/{pid}").st_uid != os.getuid():
+            return False
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            return b"sidecar_run.py" in fh.read()
+    except (OSError, ValueError):
+        return False
+
+
+_SECRETISH = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL|COOKIE|SESSION|AUTH|PRIVATE", re.I)
+_KEEP = {"HERMES_HOME", "HERMES_WEBUI_STATE_DIR", "TAKEOVER_PORT", "XAUTHORITY"}
+
+
+def child_env(home) -> Dict[str, str]:
+    """Environment for the detached helpers: the parent's, minus anything that looks like a credential (they are often
+    started from an agent or gateway process that holds provider API keys the service never needs)."""
+    env = {k: v for k, v in os.environ.items() if k in _KEEP or not _SECRETISH.search(k)}
+    env.update(HERMES_HOME=str(home), TAKEOVER_PORT=str(port()))
+    sd = state_dir()
+    if sd:
+        env["HERMES_WEBUI_STATE_DIR"] = str(sd)
+    agent_dir = str(Path(compat.load().hc.__file__).resolve().parent)
+    env["PYTHONPATH"] = agent_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    return env
 
 
 def _pidfile(home) -> Path:
@@ -141,15 +196,19 @@ def _pidfile(home) -> Path:
 
 
 def stop_sidecar(home) -> bool:
-    info = state.read_json(_pidfile(home)) or {}
-    pid = info.get("pid")
     h = health()
-    pid = pid or (h or {}).get("pid")
-    if not pid or int(pid) == os.getpid():            # never stop ourselves (setup can run inside the sidecar)
+    pid = (h or {}).get("pid") or (state.read_json(_pidfile(home)) or {}).get("pid")   # the live one first
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid == os.getpid() or not _is_our_sidecar(pid):   # never ourselves (setup can run inside it), never a stranger
+        with __import__("contextlib").suppress(OSError):
+            _pidfile(home).unlink()
         return False
     try:
-        os.kill(int(pid), 15)
-    except (OSError, ValueError):
+        os.kill(pid, 15)
+    except OSError:
         return False
     for _ in range(30):
         if not health(0.3):
@@ -165,22 +224,20 @@ def ensure_sidecar(home, restart: bool = False) -> Dict[str, Any]:
         if h and not restart and not older(h.get("version")):
             # one service serves every profile (?profile=), so whoever started it is fine; only an older copy is replaced
             return {"running": True, "started": False, "version": h.get("version")}
+        if not port_owner_ok():
+            return {"running": False, "started": False,
+                    "error": f"127.0.0.1:{port()} is held by another user's process; set TAKEOVER_PORT to a free port"}
         if h:                                                   # older version, or an explicit restart
             stop_sidecar(home)
-        sd = state_dir()
-        env = dict(os.environ)
-        env.update(HERMES_HOME=str(home), TAKEOVER_PORT=str(port()))
-        if sd:
-            env["HERMES_WEBUI_STATE_DIR"] = str(sd)
-        agent_dir = str(Path(compat.load().hc.__file__).resolve().parent)
-        env["PYTHONPATH"] = agent_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-        log = open(state.data_dir(home) / "sidecar.log", "ab")
-        proc = subprocess.Popen([sys.executable, "-u", str(PLUGIN_ROOT / "sidecar_run.py")], env=env, stdin=subprocess.DEVNULL,
-                                stdout=log, stderr=log, start_new_session=True, close_fds=True)
-        state.write_json(_pidfile(home), {"pid": proc.pid, "port": port(), "started": time.time(), "version": __version__})
+        with open(state.data_dir(home) / "sidecar.log", "ab") as log:
+            proc = subprocess.Popen([sys.executable, "-u", str(PLUGIN_ROOT / "sidecar_run.py")], env=child_env(home),
+                                    stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, close_fds=True)
         for _ in range(60):
             h = health(0.5)
             if h:
+                if h.get("pid") == proc.pid:                   # record it only once it is the one that owns the port
+                    state.write_json(_pidfile(home), {"pid": proc.pid, "port": port(), "started": time.time(),
+                                                      "version": __version__})
                 return {"running": True, "started": True, "version": h.get("version")}
             if proc.poll() is not None:
                 break
@@ -200,10 +257,10 @@ def status(home) -> Dict[str, Any]:
                                                 or h["home_id"] == home_id(home))}
 
 
-def auto_approve_allowed() -> bool:
+def auto_approve_allowed(home=None) -> bool:
     """``plugins.entries.takeover.settings.webui_auto_approve`` (default on): enabling the plugin is your consent for
     its Screen page to use its own service, so the page grants WebUI's sidecar consent itself, ONCE per WebUI."""
-    return bool(compat.setting("webui_auto_approve", True))
+    return bool(compat.setting("webui_auto_approve", True, home=home))
 
 
 def autoconsent_marker(sd: Path) -> Dict[str, Any]:
@@ -214,14 +271,24 @@ def autoconsent_marker(sd: Path) -> Dict[str, Any]:
     return {"auto": True, "nonce": secrets.token_hex(8)}
 
 
-def mark_autoconsent_used(sd: Path, nonce: str) -> bool:
-    """Called by the service after the page approved: record it and switch the marker off."""
-    if not isinstance(nonce, str) or not nonce or len(nonce) > 64:
+def _marker(sd: Path) -> Path:
+    return sd / "extensions" / PLUGIN_ID / "assets" / "autoconsent.json"
+
+
+def mark_autoconsent_used(sd: Path, nonce: Optional[str] = None) -> bool:
+    """Record that the one automatic approval happened and switch the marker off, so a later revoke sticks.
+
+    The service calls this itself on the first authenticated request it gets through WebUI's proxy (that request
+    only exists because consent was granted), so it does not depend on the page's follow-up call; the page's
+    ``/api/autoconsent-used`` must present the marker's own nonce."""
+    import hmac
+    m = state.read_json(_marker(sd)) or {}
+    if not m.get("auto"):
         return False
-    state.write_json(sd / AUTOCONSENT_RECORD, {"used_nonce": nonce, "at": time.time()})
-    marker = sd / "extensions" / PLUGIN_ID / "assets" / "autoconsent.json"
-    if marker.parent.is_dir():
-        marker.write_text(json.dumps({"auto": False}), encoding="utf-8")
+    if nonce is not None and not (isinstance(nonce, str) and hmac.compare_digest(nonce.encode(), str(m.get("nonce", "")).encode())):
+        return False
+    state.write_json(sd / AUTOCONSENT_RECORD, {"used_nonce": m.get("nonce"), "at": time.time()})
+    _marker(sd).write_text(json.dumps({"auto": False}), encoding="utf-8")
     return True
 
 

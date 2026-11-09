@@ -28,6 +28,7 @@ import re
 import logging
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -220,6 +221,7 @@ class Sessions:
     def __init__(self) -> None:
         self.lock = threading.Lock()
         self.items: Dict[str, Session] = {}
+        self.on_removed = None                  # set by serve(): what to do when this copy of the plugin is removed
         threading.Thread(target=self._reap, name="takeover-reaper", daemon=True).start()
 
     def open(self, home: str, viewer_id: str) -> Session:
@@ -259,13 +261,13 @@ class Sessions:
         while True:
             time.sleep(2.0)
             if not PLUGIN_FILE.exists():       # `hermes plugins remove takeover` deleted us: do not linger as an orphan
-                log.info("plugin removed; removing the WebUI extension and exiting")
-                try:
-                    sys.modules[__package__ + ".webui"].orphan_cleanup()
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("could not remove the WebUI extension: %s", type(exc).__name__)
                 for s in list(self.items.values()):
                     s.close(CLOSE_SCREEN_OFF)
+                try:
+                    if self.on_removed:
+                        self.on_removed()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("cleanup after removal failed: %s", type(exc).__name__)
                 os._exit(0)
             now = time.monotonic()
             with self.lock:
@@ -290,7 +292,50 @@ class App:
         self.root = hermes_root(self.home)
         self.sessions = Sessions()
         self._homes_cache: Tuple[float, list] = (0.0, [])
+        self._served_cache: Dict[str, Tuple[float, bool]] = {}
+        self._consent_recorded = False
         compat.load()
+
+    def first_authenticated(self) -> None:
+        """An authenticated request through WebUI's proxy means WebUI's consent is in place: if that consent was the
+        one automatic approval, record it now (so a later revoke sticks even if the page never confirmed it)."""
+        if self._consent_recorded:
+            return
+        self._consent_recorded = True
+        try:
+            from . import webui
+            sd = webui.state_dir()
+            if sd:
+                webui.mark_autoconsent_used(sd)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def removed(self, srv) -> None:
+        """This copy of the plugin was removed. If another profile still has Takeover, hand the service over to that
+        copy (WebUI keeps its Screen page); otherwise remove the Screen page from WebUI."""
+        from . import webui
+        others = [h for _, h in self.installed_homes(fresh=True)
+                  if (Path(h) / "plugins" / PLUGIN_ID / "sidecar_run.py").is_file()]
+        if not others:
+            log.info("plugin removed everywhere; removing the WebUI extension and exiting")
+            webui.orphan_cleanup()
+            return
+        log.info("plugin removed here; handing the service to %s", others[0])
+        srv.socket.close()                        # free the port for the successor
+        env = webui.child_env(others[0])
+        with open(state.data_dir(others[0]) / "sidecar.log", "ab") as lg:
+            subprocess.Popen([sys.executable, "-u", str(Path(others[0]) / "plugins" / PLUGIN_ID / "sidecar_run.py")], env=env,
+                             stdin=subprocess.DEVNULL, stdout=lg, stderr=lg, start_new_session=True, close_fds=True)
+
+    def served(self, home) -> bool:
+        """Installed AND enabled in that profile (cached 5 s: this runs on every request)."""
+        key, now = str(home), time.monotonic()
+        hit = self._served_cache.get(key)
+        if hit and now - hit[0] < 5:
+            return hit[1]
+        ok = plugin_installed(home) and compat.plugin_enabled(home)
+        self._served_cache[key] = (now, ok)
+        return ok
 
     def resolve(self, query: Dict[str, list]) -> Tuple[Optional[str], Optional[str], str]:
         """``(home, error, profile)`` for the request's ``?profile=``; no profile = the home this service started in."""
@@ -303,19 +348,19 @@ class App:
             home = self.root / "profiles" / name
         else:
             return None, "bad_profile", name
-        if str(home) != str(self.home) and not plugin_installed(home):
+        if str(home) != str(self.home) and not self.served(home):
             return None, "not_installed", name
         return str(home), None, name
 
-    def installed_homes(self) -> list:
-        """``[(profile, home)]`` for every profile with Takeover installed (cached 10 s)."""
+    def installed_homes(self, fresh: bool = False) -> list:
+        """``[(profile, home)]`` for every profile with Takeover installed and enabled (cached 10 s)."""
         at, homes = self._homes_cache
-        if time.monotonic() - at < 10:
+        if not fresh and time.monotonic() - at < 10:
             return homes
-        found = [("default", self.root)] if plugin_installed(self.root) or str(self.root) == str(self.home) else []
+        found = [("default", self.root)] if self.served(self.root) or str(self.root) == str(self.home) else []
         try:
             for d in sorted((self.root / "profiles").iterdir()):
-                if d.is_dir() and PROFILE_RE.fullmatch(d.name) and (plugin_installed(d) or str(d) == str(self.home)):
+                if d.is_dir() and PROFILE_RE.fullmatch(d.name) and (self.served(d) or str(d) == str(self.home)):
                     found.append((d.name, d))
         except OSError:
             pass
@@ -394,7 +439,8 @@ class App:
         if path == "/api/autoconsent-used":
             from . import webui
             sd = webui.state_dir()
-            ok = bool(sd) and webui.mark_autoconsent_used(sd, str(payload().get("nonce") or ""))
+            ok = bool(sd) and (webui.mark_autoconsent_used(sd, str(payload().get("nonce") or ""))
+                               or bool(state.read_json(sd / webui.AUTOCONSENT_RECORD)))
             return jr({"ok": ok})
         if path == "/api/dismiss":
             control.dismiss_request(home)
@@ -455,6 +501,8 @@ def make_handler(app: App):
         def log_message(self, fmt, *args):          # never log URLs: they carry session ids
             pass
 
+        timeout = 30                              # idle / slow clients cannot hold a thread forever
+
         def _run(self, method: str) -> None:
             u = urlsplit(self.path)
             try:
@@ -465,19 +513,23 @@ def make_handler(app: App):
                 self.send_error(400 if length < 0 else 413)
                 self.close_connection = True
                 return
-            body = self.rfile.read(length) if length else b""
+            code = 200 if u.path == "/health" else check_token(self.headers.get(HEADER))
+            if code != 200:                       # unauthenticated: answer without reading (or keeping) the body
+                self.close_connection = True
+                body = b""
+            else:
+                body = self.rfile.read(length) if length else b""
             try:
                 if u.path == "/health":
                     st, hdr, out = 200, {"Content-Type": "application/json"}, json.dumps(
                         {"ok": True, "service": PLUGIN_ID, "version": __version__, "pid": os.getpid(), "home_id": app.home_id,
                          "multi_profile": True}).encode()
+                elif code != 200:
+                    st, hdr, out = code, {"Content-Type": "application/json"}, json.dumps(
+                        {"ok": False, "error": "unauthorized" if code == 401 else "token_unavailable"}).encode()
                 else:
-                    code = check_token(self.headers.get(HEADER))
-                    if code != 200:
-                        st, hdr, out = code, {"Content-Type": "application/json"}, json.dumps(
-                            {"ok": False, "error": "unauthorized" if code == 401 else "token_unavailable"}).encode()
-                    else:
-                        st, hdr, out = app.route(method, u.path, parse_qs(u.query), body)
+                    app.first_authenticated()
+                    st, hdr, out = app.route(method, u.path, parse_qs(u.query), body)
             except compat.Incompatible as exc:
                 st, hdr, out = 200, {"Content-Type": "application/json"}, json.dumps(
                     {"ok": False, "error": "incompatible", "message": str(exc)}).encode()
@@ -506,6 +558,13 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
     request_queue_size = 64
+    max_threads = 96                              # long-polls are few (<= 8 streams x 2); anything past this is abuse
+
+    def process_request(self, request, client_address):
+        if threading.active_count() > self.max_threads:
+            self.shutdown_request(request)
+            return
+        super().process_request(request, client_address)
 
 
 def serve(port: int = DEFAULT_PORT) -> Server:
@@ -513,6 +572,7 @@ def serve(port: int = DEFAULT_PORT) -> Server:
     app = App()
     srv = Server(("127.0.0.1", port), make_handler(app))
     srv.app = app
+    app.sessions.on_removed = lambda: app.removed(srv)
     return srv
 
 

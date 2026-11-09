@@ -420,6 +420,40 @@ class TestTool(Base):
         self.assertEqual(out["status"], "requested")
         self.assertEqual(core.state.get_request(HOME)["status"], "pending")
 
+    def test_returns_still_waiting_before_hermes_tool_deadline_and_keeps_the_card(self):
+        saved = core.tool.call_budget
+        core.tool.call_budget = lambda: 2.0                         # pretend Hermes's tool deadline is close
+        try:
+            out = self.call(reason="sign in", wait_seconds=600)
+        finally:
+            core.tool.call_budget = saved
+        self.assertEqual(out["status"], "still_waiting", out)
+        self.assertGreater(out["wait_seconds_left"], 500)
+        self.assertEqual(core.state.request_view(HOME)["status"], "pending")      # still posted for the human
+        rid = core.state.get_request(HOME)["id"]
+        self.human(0.5, 0.5)                                       # the agent calls again: same card, then done
+        self.assertEqual(self.call(reason="sign in", wait_seconds=20)["status"], "completed")
+        self.assertEqual(core.state.get_request(HOME)["id"], rid)
+
+    def test_hermes_deadline_is_read_from_hermes(self):
+        b = core.tool.call_budget()
+        self.assertTrue(b is None or 20 <= b < 420, b)              # default 420 s deadline minus a margin
+
+    def test_two_agents_share_one_card_and_one_leaving_does_not_remove_it(self):
+        res = {}
+        t1 = threading.Thread(target=lambda: res.setdefault("a", self.call(reason="sign in to GitHub", wait_seconds=3)))
+        t1.start(); time.sleep(0.5)
+        t2 = threading.Thread(target=lambda: res.setdefault("b", self.call(reason="approve the app", wait_seconds=30)))
+        t2.start(); time.sleep(0.5)
+        v = core.state.request_view(HOME)
+        self.assertIn("sign in to GitHub", v["reason"]); self.assertIn("approve the app", v["reason"])
+        t1.join()
+        self.assertEqual(res["a"]["status"], "timeout")
+        self.assertIsNotNone(core.state.request_view(HOME), "the card must stay while another agent still waits")
+        core.control.dismiss_request(HOME)
+        t2.join(10)
+        self.assertEqual(res["b"]["status"], "dismissed")
+
     def test_interrupt_cancels(self):
         from tools import interrupt
         tid = threading.get_ident()
@@ -483,7 +517,7 @@ class TestFence(Base):
 
     def test_opt_out(self):
         BD.lease.acquire("viewer-x", profile_key=HOME)
-        core.compat.setting = lambda k, d=None: False if k == "fence_browser_tools" else d
+        core.compat.setting = lambda k, d=None, **kw: False if k == "fence_browser_tools" else d
         self.assertIsNone(core.fence.check(tool_name="browser_cdp"))
 
     def test_the_registered_hook_is_the_fence(self):
@@ -517,56 +551,74 @@ class TestNudge(Base):
             self.assertIn(needle.lower(), g.lower())
         self.assertLessEqual(len(g), 2000)
 
-    def test_real_walls_are_detected(self):
-        for page in ('- iframe "reCAPTCHA" [ref=e12]', "Verify you are human by completing the action below.",
-                     "challenges.cloudflare.com/cdn-cgi", "Our systems have detected unusual traffic from your computer",
-                     "- checkbox \"I'm not a robot\"", "Press & Hold to confirm you are a human", "hcaptcha-box"):
-            self.assertEqual((core.nudge.detect(page) or ("",))[0], "captcha", page)
-        for page in ("Enter the 6-digit code we sent to +1 *** 12", "2-Step Verification", "Open your authenticator app"):
-            self.assertEqual((core.nudge.detect(page) or ("",))[0], "code", page)
-        for page in ('- button "Authorize hermes-app" [ref=e9]', "Hermes Agent wants to access your Google Account",
-                     '- button "Allow" [ref=e3]', "Approve sign-in request", "Check your phone. Tap Yes on the notification"):
-            self.assertEqual((core.nudge.detect(page) or ("",))[0], "authorize", page)
-        for page in ('- textbox "Password" [ref=e5]', '<input type="password" name="pw">', "Sign in with a passkey"):
-            self.assertEqual((core.nudge.detect(page) or ("",))[0], "credentials", page)
-        for page in ('- textbox "Card number"', '- button "Place order" [ref=e2]'):
-            self.assertEqual((core.nudge.detect(page) or ("",))[0], "payment", page)
+    WALLS = {
+        "captcha": ('- iframe "reCAPTCHA" [ref=e12]', "Verify you are human by completing the action below.",
+                    "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b", "Our systems have detected unusual traffic from your computer",
+                    "- checkbox \"I'm not a robot\"", "Press & Hold to confirm you are a human",
+                    '- iframe "Widget containing checkbox for hCaptcha security challenge"'),
+        "code": ("Enter the 6-digit code we sent to +1 *** 12", '- textbox "Enter code" [ref=e4]',
+                 "We just sent you a verification code", '- textbox "One-time password"'),
+        "authorize": ('- button "Authorize hermes-app" [ref=e9]', "Hermes Agent wants to access your Google Account",
+                      '- button "Allow" [ref=e3]', "Approve sign-in request", "Check your phone to approve the sign-in. Tap Yes on the notification"),
+        "credentials": ('- textbox "Password" [ref=e5]', '<input type="password" name="pw">', "Sign in with a passkey",
+                        '- textbox "Username or email address" [ref=e2]'),
+        "payment": ('- textbox "Card number"', '- button "Place order" [ref=e2]', '- button "Pay now"', '- textbox "MM / YY"'),
+    }
+
+    def test_real_walls_are_detected_raw_and_as_the_browser_tools_return_them(self):
+        for kind, pages in self.WALLS.items():
+            for page in pages:
+                self.assertEqual((core.nudge.detect(page) or ("",))[0], kind, page)
+                # browser tools return JSON: quotes inside the snapshot arrive escaped in the raw result
+                wrapped = json.dumps({"success": True, "snapshot": "- heading \"Example\"\n" + page + "\n- link \"Help\""})
+                self.assertIn('\\"', wrapped) if '"' in page else None
+                self.assertEqual((core.nudge.detect(wrapped) or ("",))[0], kind, wrapped)
 
     def test_ordinary_pages_are_left_alone(self):
         for page in ("r/AskReddit - What is a skill everyone should learn?", '- link "Sign in" [ref=e1]', "Allowances and grants 2026",
-                     "The Captchas Of Old - a history (no)" .replace("Captchas", "Puzzles"), ""):
+                     "The Captchas Of Old - a history", "OTP Bank shares rose 3% on Tuesday",
+                     "This site is protected by reCAPTCHA and the Google Privacy Policy and Terms of Service apply.",
+                     "We use reCAPTCHA to keep spam out", "Best before / expiration date: 2026-05-01",
+                     "How to grant access to a shared drive", "Enable two-factor authentication in Settings > Security",
+                     "Set up 2-Step Verification and an authenticator app", "Check your phone for updates",
+                     "The company said it would authorize the app store changes", "Forgot your password? Read our guide",
+                     '- link "Pricing" - heading "Card number formats explained"', "A verification code is a short number", ""):
             self.assertIsNone(self.t(page), page)
+            self.assertIsNone(self.t(json.dumps({"success": True, "snapshot": page})), page)
 
     def test_hint_is_added_to_text_and_to_json_results(self):
-        out = self.t("page text ... reCAPTCHA ...")
+        out = self.t("page text ... I'm not a robot ...")
         self.assertIn("request_takeover", out); self.assertTrue(out.startswith("page text"))
         core.nudge._seen.clear()
         j = json.loads(self.t(json.dumps({"success": True, "snapshot": "- iframe \"reCAPTCHA\""})))
         self.assertTrue(j["success"]); self.assertIn("request_takeover", j["takeover_hint"])
 
     def test_once_per_conversation_and_kind(self):
-        self.assertIsNotNone(self.t("reCAPTCHA"))
-        self.assertIsNone(self.t("reCAPTCHA"))                       # same conversation, same kind: quiet
+        self.assertIsNotNone(self.t("I'm not a robot"))
+        self.assertIsNone(self.t("I'm not a robot"))                       # same conversation, same kind: quiet
         self.assertIsNotNone(self.t("Enter the code we sent"))       # a different kind
-        self.assertIsNotNone(self.t("reCAPTCHA", sid="s2"))          # another conversation
+        self.assertIsNotNone(self.t("I'm not a robot", sid="s2"))          # another conversation
 
     def test_quiet_when_the_user_already_has_it_or_a_request_is_open(self):
         BD.lease.acquire("viewer-x", profile_key=HOME)
-        self.assertIsNone(self.t("reCAPTCHA"))
+        self.assertIsNone(self.t("I'm not a robot"))
         BD.lease.release(profile_key=HOME)
-        core.state.create_request(HOME, "solve it")
-        self.assertIsNone(self.t("reCAPTCHA", sid="s3"))
+        core.state.create_request(HOME, "solve it")                 # an agent just asked
+        self.assertIsNone(self.t("I'm not a robot", sid="s3"))
+        r = core.state.get_request(HOME); r["created"] = time.time() - 3600 + 60; r["waiters"] = {}
+        core.state.write_json(core.state.data_dir(HOME) / "request.json", r)
+        self.assertIsNotNone(self.t("I'm not a robot", sid="s4"))  # left behind, nobody waiting: hints resume
 
     def test_only_page_reading_browser_tools_and_opt_out(self):
         for tool in ("terminal", "read_file", "web_extract", "computer_use", "browser_cdp", "request_takeover"):
-            self.assertIsNone(self.t("reCAPTCHA", tool=tool), tool)
+            self.assertIsNone(self.t("I'm not a robot", tool=tool), tool)
         saved = core.compat.setting
-        core.compat.setting = lambda k, d=None: False if k == "takeover_hints" else d
-        try: self.assertIsNone(self.t("reCAPTCHA", sid="s9"))
+        core.compat.setting = lambda k, d=None, **kw: False if k == "takeover_hints" else d
+        try: self.assertIsNone(self.t("I'm not a robot", sid="s9"))
         finally: core.compat.setting = saved
 
     def test_registered_hook_is_the_nudge_and_never_raises(self):
-        self.assertIn("request_takeover", plugin_init._transform_tool_result(tool_name="browser_navigate", result="reCAPTCHA", session_id="x"))
+        self.assertIn("request_takeover", plugin_init._transform_tool_result(tool_name="browser_navigate", result="I'm not a robot", session_id="x"))
         self.assertIsNone(plugin_init._transform_tool_result(tool_name="browser_navigate", result=None))
         self.assertIsNone(plugin_init._transform_tool_result())
 
@@ -631,7 +683,7 @@ class TestSetup(unittest.TestCase):
         self._headed = core.setup.browser_headed
         core.setup.browser_headed = lambda: False
         self.auto = True
-        core.compat.setting = lambda k, d=None: self.auto if k == "auto_install" else d
+        core.compat.setting = lambda k, d=None, **kw: self.auto if k == "auto_install" else d
 
     def tearDown(self):
         import hermes_cli.config as cfg

@@ -58,6 +58,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     target: null,          // a profile other than WebUI's active one, while answering THAT profile's request
     profile: null,         // the profile the current status / stream belong to
     approving: false,
+    webuiProfile: null,    // WebUI's own active profile as last seen
   };
   // The profile the page acts on: WebUI's active profile, unless the user is answering another profile's request.
   const prof = () => S.target || __hermesTakeoverWebuiProfile();
@@ -69,6 +70,7 @@ function __hermesTakeoverWebuiPost(path, body) {
 
   // ── API ───────────────────────────────────────────────────────────────────
   async function api(path, body, opts) {
+    followProfile();                       // the viewer id and the ?profile= of a request must belong together
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     const to = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (_) { /* ignore */ } }, (opts && opts.timeout) || 9000);
     try {
@@ -124,17 +126,18 @@ function __hermesTakeoverWebuiPost(path, body) {
         let r;
         try {
           r = await fetch(this._url('/api/rfb/recv', '&wait=4'), { credentials: 'same-origin', cache: 'no-store' });
-          this._fails = 0;
         } catch (_) {
           if (++this._fails >= 4) { this._fail(1006); return; }
           await sleep(400 * this._fails); continue;
         }
         const closed = parseInt(r.headers.get('X-Takeover-Closed'), 10);
         if (r.status === 404 || r.status === 410) { this._finish(closed || 4408); return; }
-        if (!r.ok) {
-          if (++this._fails >= 4) { this._fail(r.status === 401 || r.status === 403 ? 4401 : 1011); return; }
+        if (!r.ok) {                     // count every failed response (a revoked consent must end the stream, not spin)
+          const denied = r.status === 401 || r.status === 403;
+          if (++this._fails >= (denied ? 2 : 4)) { this._fail(denied ? 4401 : 1011); return; }
           await sleep(400 * this._fails); continue;
         }
+        this._fails = 0;
         const buf = await r.arrayBuffer();
         if (this.readyState !== 1) return;
         if (buf.byteLength && this.onmessage) this.onmessage({ data: buf });
@@ -330,6 +333,7 @@ function __hermesTakeoverWebuiPost(path, body) {
   function hide() {
     if (!S.active) return;
     S.active = false;
+    if (S.target && !S.mine) S.target = null;     // leaving the page ends "answering another profile" (unless driving)
     const main = $('main.main');
     if (main) main.classList.remove('showing-' + PANEL);
     if (side) side.classList.remove('active');
@@ -384,6 +388,9 @@ function __hermesTakeoverWebuiPost(path, body) {
   function followProfile() {
     // WebUI's profile switcher changed the profile (or the user finished answering another profile's request): the
     // lease, the screen and the viewer id all belong to a profile, so start over for the new one.
+    const w = __hermesTakeoverWebuiProfile();
+    if (S.webuiProfile && w !== S.webuiProfile && !S.mine) S.target = null;   // the user switched WebUI's profile
+    S.webuiProfile = w;
     const p = prof();
     if (S.profile === null) { S.profile = p; return; }
     if (p === S.profile) return;
@@ -483,14 +490,17 @@ function __hermesTakeoverWebuiPost(path, body) {
     setHidden(F.tools, !(running && S.mine && S.connected && S.inputOn));
     page.classList.toggle('hdo-driving', !!S.mine);
 
-    if (req && req.status === 'pending') {
-      F.ask.innerHTML = '';
+    const askKey = req && req.status === 'pending' ? req.id + '|' + req.reason : '';
+    if (askKey && F.ask.dataset.k === askKey) setHidden(F.ask, false);       // unchanged: keep the node (taps, focus)
+    else if (askKey) {
+      F.ask.dataset.k = askKey;
+      F.ask.textContent = '';
       const b = document.createElement('b'); b.textContent = 'The agent needs you: ';
       F.ask.appendChild(b); F.ask.appendChild(document.createTextNode(req.reason + ' '));
       const d = document.createElement('button'); d.type = 'button'; d.className = 'hdo-link'; d.textContent = 'Dismiss';
       d.addEventListener('click', async () => { await api('/api/dismiss', {}); await refresh(); render(); });
       F.ask.appendChild(d); setHidden(F.ask, false);
-    } else setHidden(F.ask, true);
+    } else { F.ask.dataset.k = ''; setHidden(F.ask, true); }
 
     let banner = null;
     if (S.mine && !S.connected && running) {
@@ -574,6 +584,7 @@ function __hermesTakeoverWebuiPost(path, body) {
       rfb.addEventListener('disconnect', () => setTimeout(() => onClosed(gen), 0));
     } catch (e) {
       console.warn('[takeover] connect failed', e);
+      dropTouch();
       S.rfb = null; S.chan = null; S.connecting = false; scheduleReconnect();
     }
     render();
@@ -581,7 +592,7 @@ function __hermesTakeoverWebuiPost(path, body) {
   function disconnect() {
     S.gen++; clearTimeout(S.reconnectTimer); S.reconnectTimer = null;
     const rfb = S.rfb;
-    if (S.tv) { S.tv.destroy(); S.tv = null; }
+    dropTouch();
     S.rfb = null; S.chan = null; S.connected = false; S.connecting = false; S.inputOn = false;
     if (rfb) { try { rfb.disconnect(); } catch (_) { /* already closed */ } }
     if (F.screen) F.screen.textContent = '';
@@ -591,9 +602,11 @@ function __hermesTakeoverWebuiPost(path, body) {
     const wait = ms != null ? ms : Math.min(15000, 1500 * Math.pow(2, S.retry++));
     S.reconnectTimer = setTimeout(() => { S.reconnectTimer = null; maybeConnect(); }, wait);
   }
+  function dropTouch() { if (S.tv) { S.tv.destroy(); S.tv = null; } }
   function onClosed(gen) {
     if (gen !== S.gen) return;
     const code = S.chan ? S.chan.closeCode : null;
+    dropTouch();                               // a new connection builds a new one; two would fight over the view
     S.rfb = null; S.chan = null; S.connected = false; S.connecting = false; S.inputOn = false;
     if (F.screen) F.screen.textContent = '';
     if (code === 4000) {                       // another device took over
@@ -723,8 +736,10 @@ function __hermesTakeoverWebuiPost(path, body) {
   }
 
   // ── always-on banner: the agent is asking / you still hold control, on ANY WebUI page ─────────────────────────
-  const G = { el: null, delay: 5000 };
+  const G = { el: null, delay: 5000, timer: null, key: '' };
+  function kickGlobal(ms) { clearTimeout(G.timer); G.timer = setTimeout(globalTick, ms || 0); }   // one loop, ever
   async function globalTick() {
+    clearTimeout(G.timer); G.timer = null;
     if (!document.hidden) {
       const r = await api('/api/pulse', { viewer_id: S.viewer }, { timeout: 6000 });
       if (r.ok && r.lease) {
@@ -742,6 +757,10 @@ function __hermesTakeoverWebuiPost(path, body) {
             document.body.appendChild(G.el);
           }
           G.el.className = 'hdo-global' + (mine ? ' hdo-global-me' : '');
+          const key = (mine ? 'me' : 'ask') + '|' + (req ? (req.profile || '') + '|' + req.reason : '');
+          if (G.key === key && G.el.childNodes.length) { G.el.hidden = false; }
+          else {
+          G.key = key;
           G.el.textContent = '';
           const msg = document.createElement('span');
           msg.textContent = mine ? 'You still have control of the agent\'s screen. '
@@ -755,6 +774,7 @@ function __hermesTakeoverWebuiPost(path, body) {
             const w = document.createElement('button'); w.type = 'button'; w.className = 'hdo-link'; w.textContent = 'Just watch';
             w.addEventListener('click', () => { S.target = req.profile && req.profile !== __hermesTakeoverWebuiProfile() ? req.profile : null; onNavClick(true); });
             G.el.appendChild(document.createTextNode(' ')); G.el.appendChild(w);
+          }
           }
           G.el.hidden = false;
           // sit just below WebUI's titlebar so the menu / title stay usable
@@ -771,7 +791,7 @@ function __hermesTakeoverWebuiPost(path, body) {
         }
       }
     }
-    setTimeout(globalTick, G.delay);
+    G.timer = setTimeout(globalTick, G.delay);
   }
 
   /** One tap from any WebUI page (banner, or a link to #takeover): open Screen and take control as soon as it is live. */
@@ -795,7 +815,7 @@ function __hermesTakeoverWebuiPost(path, body) {
       const b = document.querySelector('[data-extensions-tab="diagnostics"]'); if (b) b.click();
     };
     diagTab();
-    let scrolled = false, lastPoll = 0, told = false;
+    let scrolled = false, lastPoll = 0, told = false, polling = false;
     // WebUI re-renders this panel as its data loads, so keep (re)marking the row until the service answers, then go back.
     const iv = setInterval(async () => {
       if (S.approving !== t0 || Date.now() - t0 > 180000) { clearInterval(iv); return; }
@@ -810,14 +830,16 @@ function __hermesTakeoverWebuiPost(path, body) {
         if (!scrolled) { scrolled = true; row.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
         if (!told) { told = true; toast('Tap "Approve proxy consent" for Takeover'); }
       }
-      if (Date.now() - lastPoll > 1500) {
-        lastPoll = Date.now();
-        const r = await api('/api/pulse', {});
+      if (scrolled && !(btn && btn.offsetParent)) { clearInterval(iv); S.approving = false; return; }   // the user moved on
+      if (!polling && Date.now() - lastPoll > 1500) {
+        lastPoll = Date.now(); polling = true;
+        let r; try { r = await api('/api/pulse', {}); } finally { polling = false; }
         if (r.ok && S.approving === t0) {
           clearInterval(iv); S.approving = false; S.err = null;
+          const stillThere = !!document.querySelector('.hdo-approve-here');
           document.querySelectorAll('.hdo-approve-here').forEach((el) => el.classList.remove('hdo-approve-here'));
           toast('Takeover is allowed');
-          onNavClick(true); schedule(0);
+          if (stillThere) { onNavClick(true); schedule(0); }        // only pull them back if they are still on that row
         }
       }
     }, 400);
@@ -836,10 +858,15 @@ function __hermesTakeoverWebuiPost(path, body) {
     let m = null;
     try { m = await (await fetch(ASSETS + 'autoconsent.json', { cache: 'no-store', credentials: 'same-origin' })).json(); } catch (_) { return; }
     if (!m || !m.auto || !m.nonce) return;
+    const seenKey = 'hermesExt:takeover:autoconsent:' + m.nonce;
+    let seen = null; try { seen = localStorage.getItem(seenKey); } catch (_) { /* private mode */ }
+    if (seen) { AC.pending = m.nonce; markApproved(); return; }       // granted from this browser before: never again
     const probe = await api('/api/pulse', {}, { timeout: 5000 });
-    if (!probe.ok) {
+    if (!probe.ok && (probe.http === 403 || probe.http === 503)) {    // only "WebUI has no consent for us", nothing else
       try {
-        await __hermesTakeoverWebuiPost('/api/extensions/sidecar-proxy-consent', { id: 'takeover', approved: true });
+        try { localStorage.setItem(seenKey, String(Date.now())); } catch (_) { /* ignore */ }
+        const res = await __hermesTakeoverWebuiPost('/api/extensions/sidecar-proxy-consent', { id: 'takeover', approved: true });
+        if (res === undefined) throw new Error('not authenticated');   // WebUI's api() resolves undefined on 401
       } catch (e) {
         AC.error = String((e && e.message) || e);
         if (/password|authenticat/i.test(AC.error)) AC.error = 'nopassword';
@@ -849,12 +876,23 @@ function __hermesTakeoverWebuiPost(path, body) {
     AC.pending = m.nonce;
     await markApproved();
     if (S.active) schedule(0);
-    setTimeout(globalTick, 300);
+    kickGlobal(300);
   }
   async function markApproved() {
     if (!AC.pending) return;
     const r = await api('/api/autoconsent-used', { nonce: AC.pending });
     if (r.ok) AC.pending = null;
+  }
+
+  /** A #takeover link opens Screen; it takes control by itself only when an agent is actually asking right now
+   *  (a link alone must never pause the agent). */
+  async function openFromLink() {
+    const r = await api('/api/pulse', { viewer_id: S.viewer }, { timeout: 6000 });
+    const own = r.ok && r.request && r.request.status === 'pending';
+    const other = r.ok && !own && Array.isArray(r.elsewhere) && r.elsewhere.length ? r.elsewhere[0] : null;
+    if (own) takeOverFromAnywhere();
+    else if (other) answerElsewhere(other.profile);
+    else onNavClick(true);
   }
 
   /** Answer a request that came from another profile than the one WebUI is showing. */
@@ -970,10 +1008,10 @@ function __hermesTakeoverWebuiPost(path, body) {
           err: S.err, closeCode: S.chan ? S.chan.closeCode : null,
           lease: S.status && S.status.lease ? { holder: S.status.lease.holder, mine: S.status.lease.mine } : null }),
       };
-      setTimeout(globalTick, 1500);
+      kickGlobal(1500);
       if (location.hash === '#takeover') {                 // a link the agent or a notification can point at
         history.replaceState(null, '', location.pathname + location.search);
-        takeOverFromAnywhere();
+        openFromLink();
       }
       return;
     }

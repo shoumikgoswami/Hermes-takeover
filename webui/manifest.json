@@ -39,7 +39,9 @@
             "/api/extensions/takeover/sidecar/api/rfb/open",
             "/api/extensions/takeover/sidecar/api/rfb/send",
             "/api/extensions/takeover/sidecar/api/rfb/recv",
-            "/api/extensions/takeover/sidecar/api/rfb/close"
+            "/api/extensions/takeover/sidecar/api/rfb/close",
+            "/api/extensions/takeover/sidecar/api/autoconsent-used",
+            "/api/extensions/sidecar-proxy-consent"
           ]
         }
       }

@@ -57,11 +57,15 @@ Linux-only); the tool hides itself elsewhere.
    conversation and kind; never while you already hold control; opt out with `takeover_hints: false`).
 3. The tool description itself, and the bundled skill `takeover:takeover`.
 
-**Agent side.** `request_takeover(reason, wait_seconds=900)` posts the request and waits until you hand back:
+**Agent side.** `request_takeover(reason, wait_seconds=900)` posts the request and waits until you hand back. Hermes
+stops any single tool call after its tool deadline (420 s by default), so the call returns `still_waiting` shortly
+before that and the agent calls again; the request card stays up the whole time, and two agents asking at once share
+one card (both reasons shown):
 
 | Result | Meaning |
 |---|---|
 | `completed` | You did the step and handed back. The agent takes a fresh screenshot and continues. |
+| `still_waiting` | The call ran out of its own time; the agent calls again to keep waiting. |
 | `timeout` / `still_with_human` / `dismissed` / `cancelled` | The agent tells you what it is waiting for and stops. |
 
 While you hold control every screen/browser tool is refused, even screenshots, because you may be typing a credential.

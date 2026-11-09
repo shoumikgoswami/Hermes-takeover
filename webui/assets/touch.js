@@ -48,6 +48,7 @@ export class TouchView {
     on(this.stage, 'mousedown', (e) => this._md(e), cap);
     on(window, 'mousemove', (e) => this._mm(e), { capture: true });
     on(window, 'mouseup', (e) => this._mu(e), { capture: true });
+    on(window, 'blur', () => this._releaseAll(), { window: true });
     on(this.stage, 'wheel', (e) => this._wheel(e), cap);
     on(this.stage, 'contextmenu', (e) => { if (!this._ui(e)) e.preventDefault(); }, cap);
     this._ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => this._resized()) : null;
@@ -131,7 +132,8 @@ export class TouchView {
   }
   _wheelNotches(n, dirDown, p) {
     n = Math.min(n, 10); const list = [this._msg(this.mouseMask, p)]; this.cur = p;
-    for (let i = 0; i < n; i++) { list.push(this._msg(dirDown ? BTN.DOWN : BTN.UP, p)); list.push(this._msg(0, p)); }
+    // keep any held button pressed across the notches (a wheel during a drag must not drop it)
+    for (let i = 0; i < n; i++) { list.push(this._msg(this.mouseMask | (dirDown ? BTN.DOWN : BTN.UP), p)); list.push(this._msg(this.mouseMask, p)); }
     return this._emit(list);
   }
   _scrollBy(dyRemote, p) {         // dyRemote > 0: content should move down (finger dragged down) = wheel up
@@ -169,7 +171,11 @@ export class TouchView {
       Object.assign(g, { mode: 'pinch', t0: performance.now(), d0: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1,
         mx0: (a.clientX + b.clientX) / 2, my0: (a.clientY + b.clientY) / 2, s0: this.s, tx0: this.tx, ty0: this.ty,
         moved: 0, ratio: 1 });
-    } else if (this.g) { clearTimeout(this.g.timer); this.g.mode = 'ignore'; }
+    } else if (this.g) {
+      clearTimeout(this.g.timer);
+      if (this.g.mode === 'drag') { this._emit([this._msg(0, this.cur)]); stageDrag(this, false); }   // never leave it held
+      this.g.mode = 'ignore';
+    }
   }
 
   _long() {
@@ -277,12 +283,21 @@ export class TouchView {
     this.focus();
   }
   _mm(e) {
+    if (this.mouseMask && e.buttons === 0) this._releaseAll();       // released outside the window
     if (!this.mouseMask && !this._over(e)) return;
+    // ours alone: noVNC's own canvas handlers would send a second, unscaled pointer stream with the wrong mask
+    if (!this._ui(e)) e.stopPropagation();
     const p = this._remote(e.clientX, e.clientY); this.cur = p;
     if (this.canWrite()) this._emit([this._msg(this.mouseMask, p)]);
   }
+  _releaseAll() {
+    if (!this.mouseMask) return;
+    this.mouseMask = 0;
+    if (this.cur && this.canWrite()) this._emit([this._msg(0, this.cur)]);
+  }
   _over(e) { const r = this.stage.getBoundingClientRect(); return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom; }
   _mu(e) {
+    if (this._over(e) && !this._ui(e)) e.stopPropagation();
     if (!this.mouseMask) return;
     const bit = e.button === 0 ? BTN.LEFT : e.button === 1 ? BTN.MID : e.button === 2 ? BTN.RIGHT : 0;
     this.mouseMask &= ~bit;

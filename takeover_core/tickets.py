@@ -37,7 +37,7 @@ def valid_viewer_id(home, viewer_id: object) -> bool:
     if not isinstance(viewer_id, str) or viewer_id.count(".") != 1 or len(viewer_id) > 80:
         return False
     rnd, sig = viewer_id.split(".")
-    return hmac.compare_digest(sig, _sig(home, rnd))
+    return hmac.compare_digest(sig.encode("utf-8", "replace"), _sig(home, rnd).encode())   # str compare raises on non-ASCII
 
 
 def short(viewer_id: Optional[str]) -> str:

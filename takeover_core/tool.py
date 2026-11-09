@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from . import compat, control, setup, state
 
@@ -17,8 +17,9 @@ SCHEMA = {
         "(password, sign-in, passkey), approving or authorizing something (OAuth consent, 'Allow access', sign-in or device "
         "approval), a 2FA/SMS/email code, a CAPTCHA or bot check, a payment, or an unexpected consent page. The user sees your request on the Screen page of "
         "hermes-webui or the Hermes dashboard (also on their phone), taps the one-tap Take over button, does the step in the SAME browser you are using, then hands "
-        "control back. This call WAITS until they have handed back (default up to 15 minutes), so you do not need to "
-        "ask them to say 'done'. While they hold control, all your screen/browser tools are refused. Never ask the user "
+        "control back. This call WAITS until they have handed back, so you do not need to ask them to say 'done'. "
+        "Hermes limits one tool call to a few minutes: if the result is 'still_waiting', call it again with the same "
+        "reason to keep waiting (the request stays posted). While they hold control, all your screen/browser tools are refused. Never ask the user "
         "to type secrets into chat; use this instead. After it returns 'completed', take a fresh screenshot/snapshot "
         "before acting: the page has changed."),
     "parameters": {
@@ -56,6 +57,19 @@ def handle(args: Dict[str, Any], **kwargs: Any) -> str:
         return _out("error", f"request_takeover failed: {type(exc).__name__}: {exc}")
 
 
+def call_budget() -> Optional[float]:
+    """Seconds this tool call may block. Hermes stops any tool call after its tool deadline (420 s by default,
+    ``timeouts.tools.sequential_call``) and interrupts it; waiting longer would lose the answer. None = no deadline."""
+    try:
+        from agent.tool_executor import _resolve_sequential_tool_timeout
+        t = _resolve_sequential_tool_timeout()
+    except Exception:  # noqa: BLE001 - older / newer Hermes: assume the documented default
+        t = 420.0
+    if t is None or t <= 0:
+        return None
+    return max(20.0, float(t) - 45.0)
+
+
 def _handle(args: Dict[str, Any]) -> str:
     bd = compat.load()
     reason = str(args.get("reason") or "").strip()
@@ -66,9 +80,11 @@ def _handle(args: Dict[str, Any]) -> str:
     except (TypeError, ValueError):
         wait = DEFAULT_WAIT
     home = compat.current_home()
+    budget = call_budget()
+    started = time.monotonic()
 
-    try:
-        ready = setup.ensure_ready(home)
+    try:                                   # never block the whole call on first-run setup
+        ready = setup.ensure_ready(home, timeout=min(120.0, (budget or 600.0) / 3))
     except RuntimeError as exc:
         return _out("error", f"The screen is not available: {exc}")
     try:                                   # keep the hermes-webui half current (no-op when WebUI is not on this host)
@@ -90,20 +106,25 @@ def _handle(args: Dict[str, Any]) -> str:
         warn = (" Note: browser.headed is off, so your Chrome may be headless and the human may see an empty desktop; "
                 "run `hermes config set browser.headed true`.")
     epoch0 = bd.lease.get(profile_key=home).epoch
-    req = state.create_request(home, reason)
+    req, waiter = state.join_request(home, reason)
     if wait == 0:
+        state.leave_request(home, req["id"], waiter)          # posted; nobody waits in this call
         return _out("requested", "Request posted. Stop and tell the user to tap Take over in the banner (or open Screen), "
                     "do the step, then Hand back." + warn)
 
     from tools import interrupt
-    deadline, taken = time.monotonic() + wait, False
+    # wait for the human, but return before Hermes's tool deadline would cut this call off
+    this_call = wait if budget is None else min(wait, max(0.0, budget - (time.monotonic() - started)))
+    deadline, taken = time.monotonic() + this_call, False
+    last_beat = last_touch = 0.0
     while True:
         if interrupt.is_interrupted():
-            state.update_request(home, req["id"], status="cancelled")
+            state.leave_request(home, req["id"], waiter, status="cancelled")
             return _out("cancelled", "Interrupted while waiting for the human.")
         cur = state.get_request(home) or {}
         mine = cur.get("id") == req["id"]
         if mine and cur.get("status") == "dismissed":
+            state.leave_request(home, req["id"], waiter)
             return _out("dismissed", "The human dismissed the request without doing it. Ask them what they want.")
         lease = bd.lease.get(profile_key=home)
         if lease.holder == bd.lease.HUMAN:
@@ -112,15 +133,36 @@ def _handle(args: Dict[str, Any]) -> str:
             # a take-over + hand-back can both happen between two polls: the hand-back marks the request done and
             # every lease transition bumps the epoch, so neither is missed
             state.update_request(home, req["id"], status="done", done=time.time())
+            state.leave_request(home, req["id"], waiter)
             return _out("completed", "The human did the step and handed control back. Take a fresh screenshot/snapshot "
                         "before continuing; the page has probably changed.")
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now - last_beat > 5:
+            last_beat = now
+            state.heartbeat(home, req["id"], waiter)
+        if now - last_touch > 20:          # a screen someone is about to use is not idle: keep Bot Desktop's auto-stop away
+            last_touch = now
+            try:
+                with compat.home_scope(home):
+                    bd.runtime.touch_activity()
+            except Exception:  # noqa: BLE001
+                pass
+        if now >= deadline:
             break
         time.sleep(1.0)
 
+    left = wait - (time.monotonic() - started)
+    if left > 5:
+        # out of time for THIS call only: keep the request posted and let the agent call again to keep waiting
+        state.leave_request(home, req["id"], waiter)
+        what = "has taken over but not handed back yet" if taken else "has not taken over yet"
+        return _out("still_waiting", f"The human {what}. The request is still posted. Call request_takeover again with "
+                    f"the same reason and wait_seconds={int(left)} to keep waiting (you will not post a second "
+                    "request); or tell the user what you need and stop.", wait_seconds_left=int(left))
     if taken:
+        state.leave_request(home, req["id"], waiter)
         return _out("still_with_human", "The human took over but has not handed back yet. Tell the user you are waiting, "
                     "and stop; do not use screen tools until they hand back (they would be refused).")
-    state.update_request(home, req["id"], status="expired")
+    state.leave_request(home, req["id"], waiter, status="expired")
     return _out("timeout", f"Nobody took over within {wait}s. Tell the user what you need and that they can open Screen "
                 "in hermes-webui or the Hermes dashboard; then stop." + warn)

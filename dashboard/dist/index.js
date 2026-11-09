@@ -171,7 +171,8 @@
           this.applyInput();
           if (/[?&]take=1\b/.test(location.search)) {          // one tap from the banner: take control as soon as it is live
             history.replaceState(null, "", location.pathname);
-            if (!this.s.mine) this.takeOver();
+            const req = this.s.status && this.s.status.request;      // a link alone never pauses the agent
+            if (!this.s.mine && req && req.status === "pending") this.takeOver();
           }
         });
         rfb.addEventListener("disconnect", () => setTimeout(() => this.onClosed(gen), 0));

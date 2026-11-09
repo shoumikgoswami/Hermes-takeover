@@ -61,12 +61,11 @@ def needs(home) -> Dict[str, bool]:
 
 
 def spawn(home) -> Optional[int]:
-    env = dict(os.environ, HERMES_HOME=str(home))
-    agent_dir = str(Path(compat.load().hc.__file__).resolve().parent)
-    env["PYTHONPATH"] = agent_dir + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-    log = open(state.data_dir(home) / "bootstrap.log", "ab")
-    p = subprocess.Popen([sys.executable, "-u", str(PLUGIN_ROOT / "bootstrap_run.py")], env=env, stdin=subprocess.DEVNULL,
-                         stdout=log, stderr=log, start_new_session=True, close_fds=True)
+    from . import webui
+    env = webui.child_env(home)                    # no credentials in a detached helper; PYTHONPATH reaches Hermes
+    with open(state.data_dir(home) / "bootstrap.log", "ab") as log:
+        p = subprocess.Popen([sys.executable, "-u", str(PLUGIN_ROOT / "bootstrap_run.py")], env=env, stdin=subprocess.DEVNULL,
+                             stdout=log, stderr=log, start_new_session=True, close_fds=True)
     return p.pid
 
 

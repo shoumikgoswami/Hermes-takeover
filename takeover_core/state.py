@@ -1,7 +1,8 @@
 """Small cross-process state under ``<HERMES_HOME>/plugin-data/takeover/`` (Hermes's per-plugin data root, which
 survives ``hermes plugins update``/``remove``; same path ``plugins.plugin_storage.plugin_data_dir`` gives, but for an
-explicit home because the dashboard and the WebUI service serve a home that is not necessarily the active one) (the tool runs in the agent process, the
-dashboard in another; files are the shared truth, same as the Bot Desktop lease).
+explicit home because the dashboard and the WebUI service serve a home that is not necessarily the active one). The
+tool runs in the agent process and the dashboard / WebUI service in others, so files are the shared truth (same as the
+Bot Desktop lease); writes that read-modify-write go through a file lock.
 
 * ``request.json``  the agent's "I need you" request (reason, status)
 * ``setup.json``    first-run setup progress / outcome
@@ -9,6 +10,8 @@ dashboard in another; files are the shared truth, same as the Bot Desktop lease)
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import secrets
@@ -18,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 REQUEST_TTL = 3600.0       # a pending request nobody acted on for an hour is stale
+WAITER_ALIVE = 15.0        # a waiting agent call refreshes its heartbeat more often than this
 
 
 def data_dir(home) -> Path:
@@ -51,18 +55,40 @@ def write_json(path: Path, data: Dict[str, Any]) -> None:
 
 
 def secret(home) -> bytes:
+    """Per-home HMAC key. Created once, atomically (write aside, publish with a create-or-fail link), so concurrent
+    first users in several processes all end up with the same key instead of overwriting each other's."""
     p = data_dir(home) / "secret"
+    for _ in range(3):
+        try:
+            b = p.read_bytes()
+            if len(b) >= 32:
+                return b
+        except OSError:
+            pass
+        fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=".secret.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(secrets.token_bytes(32))
+            os.chmod(tmp, 0o600)
+            try:
+                os.link(tmp, p)                  # fails if another process published first: then read theirs
+            except FileExistsError:
+                pass
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+    return p.read_bytes()
+
+
+@contextlib.contextmanager
+def _locked(home):
+    fh = open(data_dir(home) / "request.lock", "a+")
     try:
-        b = p.read_bytes()
-        if len(b) >= 32:
-            return b
-    except OSError:
-        pass
-    b = secrets.token_bytes(32)
-    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(b)
-    return b
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        fh.close()
 
 
 # ── the agent's request ───────────────────────────────────────────────────────
@@ -76,24 +102,69 @@ def get_request(home) -> Optional[Dict[str, Any]]:
 
 
 def create_request(home, reason: str) -> Dict[str, Any]:
-    r = {"id": secrets.token_hex(6), "reason": reason[:300], "status": "pending", "created": time.time()}
-    write_json(data_dir(home) / "request.json", r)
-    return r
+    """Post a request (used by ``wait_seconds=0`` and tests). Joins a live one instead of replacing it."""
+    return join_request(home, reason)[0]
+
+
+def join_request(home, reason: str, waiter: Optional[str] = None):
+    """``(request, waiter_id)``. One request card per profile: a second agent (or the same agent calling again to keep
+    waiting) joins the live request instead of overwriting it, so nobody misses the human's dismissal or hand-back."""
+    reason = reason.strip()[:300]
+    waiter = waiter or secrets.token_hex(4)
+    now = time.time()
+    with _locked(home):
+        r = get_request(home)
+        if r and r.get("status") in ("pending", "taken"):
+            if reason and reason != r.get("reason") and reason not in (r.get("also") or []):
+                r["also"] = ((r.get("also") or []) + [reason])[-4:]
+        else:
+            r = {"id": secrets.token_hex(6), "reason": reason, "status": "pending", "created": now}
+        r.setdefault("waiters", {})[waiter] = now
+        write_json(data_dir(home) / "request.json", r)
+    return r, waiter
+
+
+def heartbeat(home, rid: str, waiter: str) -> None:
+    with _locked(home):
+        r = get_request(home)
+        if r and r.get("id") == rid and r.get("status") in ("pending", "taken"):
+            r.setdefault("waiters", {})[waiter] = time.time()
+            write_json(data_dir(home) / "request.json", r)
+
+
+def leave_request(home, rid: str, waiter: str, status: Optional[str] = None) -> Optional[str]:
+    """This waiter stops waiting. ``status`` (expired / cancelled) is applied only if no other live waiter remains, so
+    one agent giving up never takes the card away from another that is still waiting. Returns the status applied."""
+    with _locked(home):
+        r = get_request(home)
+        if not r or r.get("id") != rid:
+            return None
+        ws = {k: v for k, v in (r.get("waiters") or {}).items() if k != waiter and time.time() - float(v) < WAITER_ALIVE}
+        r["waiters"] = ws
+        applied = None
+        if status and not ws and r.get("status") in ("pending", "taken"):
+            r["status"] = applied = status
+        write_json(data_dir(home) / "request.json", r)
+        return applied
 
 
 def update_request(home, rid: Optional[str], **fields) -> Optional[Dict[str, Any]]:
     """Update the current request (only if ``rid`` still matches, so a stale caller cannot clobber a newer one)."""
-    r = get_request(home)
-    if not r or (rid is not None and r.get("id") != rid):
-        return None
-    r.update(fields)
-    write_json(data_dir(home) / "request.json", r)
-    return r
+    with _locked(home):
+        r = get_request(home)
+        if not r or (rid is not None and r.get("id") != rid):
+            return None
+        r.update(fields)
+        write_json(data_dir(home) / "request.json", r)
+        return r
 
 
 def request_view(home) -> Optional[Dict[str, Any]]:
     """The request as the UI should show it: only live ones (pending / taken)."""
     r = get_request(home)
     if r and r.get("status") in ("pending", "taken"):
-        return {k: r.get(k) for k in ("id", "reason", "status", "created")}
+        v = {k: r.get(k) for k in ("id", "reason", "status", "created")}
+        if r.get("also"):
+            v["reason"] = "; ".join([r.get("reason") or ""] + list(r["also"]))[:400]
+        return v
     return None

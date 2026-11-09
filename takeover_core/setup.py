@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from . import PLUGIN_ID, __version__, compat, state
+from . import __version__, compat, state
 
 MAX_LINES = 80
 _xvnc_cache: Dict[str, Any] = {}
@@ -89,7 +89,7 @@ def setup_state(home) -> Dict[str, Any]:
         s["error"] = s.get("error") or "setup was interrupted"
     s.setdefault("state", "idle")
     s.setdefault("lines", [])
-    s["auto_allowed"] = bool(compat.setting("auto_install", True))
+    s["auto_allowed"] = bool(compat.setting("auto_install", True, home=home))
     s["attempted"] = bool(s.get("attempted_version"))
     return s
 
@@ -181,10 +181,16 @@ def _run(bd, s: Dict[str, Any], line: Callable[[str], None]) -> None:
     if not browser_headed():
         line("Enabling browser.headed so the agent's Chrome opens on the screen…")
         try:
+            import contextlib
+            import io
             from hermes_cli.config import set_config_value
-            set_config_value("browser.headed", "true")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                set_config_value("browser.headed", "true")      # prints; and in managed mode refuses by printing only
+            if not browser_headed():
+                raise RuntimeError("the config write did not take effect (managed install?)")
         except (SystemExit, Exception) as exc:  # noqa: BLE001 - managed installs refuse config writes
-            line(f"Could not set browser.headed automatically ({type(exc).__name__}). Run: hermes config set browser.headed true")
+            line(f"Could not set browser.headed automatically ({type(exc).__name__}: {exc}). "
+                 "Run: hermes config set browser.headed true")
     try:
         from . import webui
         if webui.state_dir() is not None:
@@ -232,7 +238,7 @@ def ensure_ready(home, timeout: float = 600.0) -> Dict[str, Any]:
         return r
     if not r["supported"]:
         raise RuntimeError("Takeover needs a Linux host with Bot Desktop; this host is not supported.")
-    if not compat.setting("auto_install", True) and setup_state(home)["state"] != "running":
+    if not compat.setting("auto_install", True, home=home) and setup_state(home)["state"] != "running":
         raise RuntimeError("Takeover is not set up and auto_install is off. Run: hermes takeover setup")
     start_async(home)
     end = time.time() + timeout

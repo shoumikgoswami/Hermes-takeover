@@ -181,7 +181,8 @@ class TestProfiles(Base):
         self.p2 = Path(HOME) / "profiles" / "p2"
         (self.p2 / "plugins" / "takeover").mkdir(parents=True, exist_ok=True)
         (self.p2 / "plugins" / "takeover" / "plugin.yaml").write_text("name: takeover\n")
-        type(self).app._homes_cache = (0.0, [])
+        (self.p2 / "config.yaml").write_text("plugins:\n  enabled: [takeover]\n")      # user plugins are opt-in
+        type(self).app._homes_cache = (0.0, []); type(self).app._served_cache = {}
         for h in (HOME, str(self.p2)):
             try: os.unlink(core.state.data_dir(h) / "request.json")
             except OSError: pass
@@ -192,6 +193,14 @@ class TestProfiles(Base):
         self.assertEqual(Path(j["hermes_home"]).resolve(), Path(HOME).resolve())
         st, j = self.req("POST", "/api/status?profile=p2", {})[:2]
         self.assertTrue(j["ok"], j); self.assertEqual(Path(j["hermes_home"]).resolve(), self.p2.resolve())
+
+    def test_a_profile_where_takeover_is_disabled_is_not_served(self):
+        (self.p2 / "config.yaml").write_text("plugins:\n  enabled: [takeover]\n  disabled: [takeover]\n")
+        type(self).app._served_cache = {}
+        self.assertEqual(self.req("POST", "/api/status?profile=p2", {})[1]["error"], "not_installed")
+        (self.p2 / "config.yaml").write_text("plugins:\n  enabled: []\n")
+        type(self).app._served_cache = {}
+        self.assertEqual(self.req("POST", "/api/status?profile=p2", {})[1]["error"], "not_installed")
 
     def test_not_installed_and_bad_names_are_refused(self):
         self.assertEqual(self.req("POST", "/api/status?profile=ghost", {})[1]["error"], "not_installed")
@@ -247,12 +256,75 @@ class TestAutoApproveOnce(Base):
 
     def test_opt_out(self):
         saved = core.compat.setting
-        core.compat.setting = lambda k, d=None: False if k == "webui_auto_approve" else d
+        core.compat.setting = lambda k, d=None, **kw: False if k == "webui_auto_approve" else d
         try:
             core.webui.install_extension(self.sd)
         finally:
             core.compat.setting = saved
         self.assertEqual(self.marker(), {"auto": False})
+
+
+    def test_a_wrong_nonce_does_not_switch_it_off(self):
+        core.webui.install_extension(self.sd)
+        self.assertFalse(core.webui.mark_autoconsent_used(self.sd, "not-the-nonce"))
+        self.assertFalse(core.webui.mark_autoconsent_used(self.sd, "é"))
+        self.assertTrue(self.marker()["auto"])
+
+    def test_the_first_authenticated_request_records_it_without_the_page(self):
+        core.webui.install_extension(self.sd)
+        app = core.sidecar.App(); app._consent_recorded = False
+        app.first_authenticated()                     # what any proxied, token-carrying request does first
+        self.assertEqual(self.marker(), {"auto": False})
+        self.assertTrue((self.sd / core.webui.AUTOCONSENT_RECORD).exists())
+
+
+class TestProcessSafety(Base):
+    def test_never_signals_a_process_that_is_not_our_sidecar(self):
+        import subprocess as sp
+        victim = sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            core.state.write_json(core.webui._pidfile(HOME), {"pid": victim.pid})      # a stale pidfile, pid reused
+            saved = core.webui.health
+            core.webui.health = lambda *a, **k: None
+            try:
+                self.assertFalse(core.webui.stop_sidecar(HOME))
+            finally:
+                core.webui.health = saved
+            self.assertIsNone(victim.poll(), "an unrelated process was signalled")
+            self.assertFalse(core.webui._pidfile(HOME).exists(), "the stale pidfile is dropped")
+        finally:
+            victim.kill(); victim.wait()
+
+    def test_a_listener_of_another_user_is_not_trusted(self):
+        saved = core.webui.listener_uid
+        try:
+            core.webui.listener_uid = lambda p: os.getuid() + 1
+            self.assertFalse(core.webui.port_owner_ok())
+            core.webui.listener_uid = lambda p: os.getuid()
+            self.assertTrue(core.webui.port_owner_ok())
+        finally:
+            core.webui.listener_uid = saved
+        self.assertEqual(core.webui.listener_uid(self.port), os.getuid())       # the real /proc lookup finds this test's server
+
+    def test_helpers_do_not_inherit_credentials(self):
+        os.environ["OPENAI_API_KEY"] = "sk-test"; os.environ["SOME_TOKEN"] = "t"
+        try:
+            env = core.webui.child_env(HOME)
+        finally:
+            os.environ.pop("OPENAI_API_KEY"); os.environ.pop("SOME_TOKEN")
+        self.assertNotIn("OPENAI_API_KEY", env); self.assertNotIn("SOME_TOKEN", env)
+        self.assertEqual(env["HERMES_HOME"], HOME); self.assertIn("PATH", env); self.assertIn("PYTHONPATH", env)
+
+    def test_non_ascii_viewer_id_is_rejected_not_a_500(self):
+        self.assertFalse(core.tickets.valid_viewer_id(HOME, "é" * 10 + ".é"))
+        st, body = self.req("POST", "/api/take-over", {"viewer_id": "abc.é"})
+        self.assertNotEqual(st, 500, body)
+
+    def test_unauthenticated_requests_are_refused_before_reading_the_body(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.putrequest("POST", "/api/rfb/send?sid=x"); c.putheader("Content-Length", "900000"); c.endheaders()
+        r = c.getresponse()                            # answered at once, although the body never came
+        self.assertEqual(r.status, 401); c.close()
 
 
 class TestStream(Base):
@@ -446,7 +518,7 @@ class TestWebuiIntegration(unittest.TestCase):
     def test_switch_off_means_hands_off(self):
         saved = (self.webui.state_dir, core.compat.setting)
         self.webui.state_dir = lambda: self.sd
-        core.compat.setting = lambda k, d=None: False if k == "webui_integration" else d
+        core.compat.setting = lambda k, d=None, **kw: False if k == "webui_integration" else d
         try:
             self.assertEqual(self.webui.integrate(HOME), {"detected": True, "disabled": True})
             self.assertFalse((self.sd / "extensions").exists())          # nothing written, no process started

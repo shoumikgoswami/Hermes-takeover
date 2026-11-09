@@ -15,7 +15,7 @@ REQUIRED = {
     "lease": ["acquire", "release", "get", "public_view", "assert_agent_may_act", "HumanHasControl", "HUMAN", "AGENT"],
     "rfb_filter": ["RfbClientFilter"],
     "runtime": ["start", "stop", "status", "is_running", "is_supported_host", "missing_binaries", "install_command",
-                "state_dir", "touch_activity", "in_sandbox", "sandbox_screen_running", "open_rfb_stream"],
+                "state_dir", "touch_activity", "installable", "in_sandbox", "sandbox_screen_running", "open_rfb_stream"],
     "install": ["install_packages", "NO_SUDO"],
 }
 
@@ -69,11 +69,30 @@ def home_scope(home):
         hc.reset_hermes_home_override(token)
 
 
-def setting(key: str, default=None):
-    """``plugins.entries.takeover.settings.<key>`` from config.yaml (read-only, any process)."""
+def _config(home=None) -> dict:
+    from hermes_cli.config import load_config_readonly
+    if home is None:
+        return load_config_readonly() or {}
+    with home_scope(home):                 # config.yaml of THAT profile, not of the process that runs this
+        return load_config_readonly() or {}
+
+
+def setting(key: str, default=None, home=None):
+    """``plugins.entries.takeover.settings.<key>`` from config.yaml (read-only, any process). Pass ``home`` when acting
+    for a profile other than this process's own (the WebUI service and the dashboard serve several)."""
     try:
-        from hermes_cli.config import load_config_readonly
-        entry = ((load_config_readonly().get("plugins") or {}).get("entries") or {}).get("takeover") or {}
+        entry = ((_config(home).get("plugins") or {}).get("entries") or {}).get("takeover") or {}
         return (entry.get("settings") or {}).get(key, default)
     except Exception:  # noqa: BLE001
         return default
+
+
+def plugin_enabled(home) -> bool:
+    """Is Takeover enabled in that profile (``plugins.enabled`` and not ``plugins.disabled``; user plugins are opt-in)?
+    Unreadable config: True, so a parse hiccup never takes the screen away mid-takeover."""
+    try:
+        p = _config(home).get("plugins") or {}
+        names = lambda v: {x for x in v if isinstance(x, str)} if isinstance(v, list) else set()  # noqa: E731
+        return "takeover" in names(p.get("enabled")) and "takeover" not in names(p.get("disabled"))
+    except Exception:  # noqa: BLE001
+        return True

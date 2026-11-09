@@ -22,9 +22,10 @@ strong signal, but you decide (ignore it if the page does not actually need the 
 
 ## How
 1. Call `request_takeover(reason="<one sentence: exactly what to do>")`. Example reasons: "Sign in to GitHub and approve the Hermes app", "Enter the SMS code for your bank login". The user gets a one-tap Take over button.
-2. The call **waits** (up to 15 min by default) until the human hands control back. You do not need them to say "done".
+2. The call **waits** until the human hands control back. You do not need them to say "done". Hermes caps one tool call at a few
+   minutes: on `still_waiting`, call `request_takeover` again with the same reason (it joins the same request, no second card).
 3. Result `completed`: take a **fresh screenshot/snapshot first**, the page has changed, then continue.
-4. Result `timeout` / `still_with_human` / `dismissed`: tell the user plainly what you are waiting for and **stop the turn**.
+4. Result `timeout` / `still_with_human` / `dismissed` (or `still_waiting` after you have re-called a few times): tell the user plainly what you are waiting for and **stop the turn**.
    Do not retry in a loop.
 
 ## While the human has control
