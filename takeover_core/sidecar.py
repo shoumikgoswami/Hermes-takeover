@@ -86,12 +86,11 @@ def plugin_installed(home) -> bool:
 
 
 def hermes_root(home) -> Path:
-    """The root that holds ``profiles/`` (Hermes's own rule when available)."""
-    try:
-        return Path(compat.load().hc.get_default_hermes_root(home=str(home)))
-    except Exception:  # noqa: BLE001 - older Hermes
-        h = Path(str(home))
-        return h.parent.parent if h.parent.name == "profiles" else h
+    """The root that holds ``profiles/``: ``<root>/profiles/<name>`` -> ``<root>``, anything else is a root itself.
+    (Deliberately not Hermes's ``get_default_hermes_root``: that maps ANY directory under ``~/.hermes`` to ``~/.hermes``,
+    which would point a scratch / custom home at the user's real default profile.)"""
+    h = Path(str(home))
+    return h.parent.parent if h.parent.name == "profiles" else h
 
 
 def home_id(home) -> str:
@@ -295,7 +294,7 @@ class App:
 
     def resolve(self, query: Dict[str, list]) -> Tuple[Optional[str], Optional[str], str]:
         """``(home, error, profile)`` for the request's ``?profile=``; no profile = the home this service started in."""
-        name = ((query.get("profile") or [""])[0] or "").strip().lower()
+        name = ((query.get("profile") or [""])[0] or "").strip()
         if not name:
             return str(self.home), None, ""
         if name == "default":
