@@ -100,15 +100,17 @@ try:
     # ── before consent ──
     js(A, "window.__hermesTakeover.open()")
     A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent!=='Connecting…'", 20)
-    check("before approval the page explains the one-time step", "approval" in state_text(A).lower(), state_text(A))
+    check("before approval the page explains the one-time step", "allow takeover" in state_text(A).lower(), state_text(A))
     A.screenshot(f"{SHOTS}/1-needs-approval.png")
 
     # ── the one manual step, as a user does it: "Allow Takeover" -> WebUI's own highlighted consent button ──
     check("the page offers a one-tap 'Allow Takeover'", has(A, "#mainTakeover [data-f=approve]"))
     clk(A, "#mainTakeover [data-f=approve]")
     A.wait("!!document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')", 20)
+    time.sleep(2)                                  # let WebUI finish re-rendering the panel: the mark must survive it
+    A.wait("!!document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')", 10)
     check("it lands on WebUI's own consent button for Takeover, highlighted",
-          A.eval("document.querySelector('[data-extension-sidecar-proxy-id=\"takeover\"]').textContent").strip().lower().startswith("approve"))
+          (A.eval("(document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')||{}).textContent") or "").strip().lower().startswith("approve"))
     A.screenshot(f"{SHOTS}/1b-approval-highlighted.png")
     A.eval("document.querySelector('[data-extension-sidecar-proxy-id=\"takeover\"]').click()")
     A.wait("window.__hermesTakeover.state().active", 20)

@@ -777,27 +777,34 @@ function __hermesTakeoverWebuiProfile() {
   // Extensions -> Takeover's sidecar row), highlight it, and come back to the Screen page as soon as it is approved.
   async function goToApproval() {
     if (typeof window.switchPanel !== 'function') return;
-    S.approving = true;
+    const t0 = Date.now(); S.approving = t0;
     await window.switchPanel('settings');
     if (typeof switchSettingsSection === 'function') switchSettingsSection('extensions');
-    let btn = null;
-    for (let i = 0; i < 50 && !btn; i++) {
-      btn = document.querySelector('[data-extension-sidecar-proxy-id="takeover"]');
-      if (!btn) await sleep(200);
-    }
-    if (!btn) { toast('Open Settings → Extensions → Diagnostics → Loopback sidecars → Takeover → Approve proxy consent.'); return; }
-    for (let el = btn.parentElement; el; el = el.parentElement) {
-      if (el.tagName === 'DETAILS') el.open = true;
-      if (el.hidden) el.hidden = false;
-    }
-    const row = btn.closest('.extension-sidecar-row') || btn;
-    row.classList.add('hdo-approve-here'); btn.classList.add('hdo-approve-btn');
-    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    toast('Tap "Approve proxy consent" for Takeover');
-    btn.addEventListener('click', () => {
-      if (btn.dataset.extensionSidecarProxyApproved !== 'true') return;      // a Revoke click: stay here
-      setTimeout(() => { S.err = null; onNavClick(true); schedule(0); }, 900);
-    }, { once: true });
+    let scrolled = false, lastPoll = 0, told = false;
+    // WebUI re-renders this panel as its data loads, so keep (re)marking the row until the service answers, then go back.
+    const iv = setInterval(async () => {
+      if (S.approving !== t0 || Date.now() - t0 > 180000) { clearInterval(iv); return; }
+      const btn = document.querySelector('[data-extension-sidecar-proxy-id="takeover"]');
+      if (btn) {
+        for (let el = btn.parentElement; el; el = el.parentElement) {
+          if (el.tagName === 'DETAILS' && !el.open) el.open = true;
+        }
+        const row = btn.closest('.extension-sidecar-row') || btn;
+        row.classList.add('hdo-approve-here'); btn.classList.add('hdo-approve-btn');
+        if (!scrolled) { scrolled = true; row.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+        if (!told) { told = true; toast('Tap "Approve proxy consent" for Takeover'); }
+      }
+      if (Date.now() - lastPoll > 1500) {
+        lastPoll = Date.now();
+        const r = await api('/api/pulse', {});
+        if (r.ok && S.approving === t0) {
+          clearInterval(iv); S.approving = false; S.err = null;
+          document.querySelectorAll('.hdo-approve-here').forEach((el) => el.classList.remove('hdo-approve-here'));
+          toast('Takeover is allowed');
+          onNavClick(true); schedule(0);
+        }
+      }
+    }, 400);
   }
 
   /** Answer a request that came from another profile than the one WebUI is showing. */
