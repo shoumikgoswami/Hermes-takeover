@@ -88,22 +88,31 @@ chrome = Chrome(9334)
 term = None
 try:
     A = page(chrome)
-    # start clean (from inside the page: WebUI's own script attaches the CSRF token): revoke consent left by a previous
-    # run and skip WebUI's first-run wizard so it does not cover the page
-    A.eval("""Promise.all([
-      fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:false})}),
-      fetch('/api/settings',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({onboarding_completed:true})})]).then(r=>r.map(x=>x.status))""", True)
+    # skip WebUI's first-run wizard so it does not cover the page (in-page: WebUI's own script handles the request)
+    A.eval("fetch('/api/settings',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({onboarding_completed:true})}).then(r=>r.status)", True)
     A.call("Page.reload"); time.sleep(1)
     A.wait("!!window.__hermesTakeover && !!document.querySelector('.rail .hdo-rail')", 40)
     check("extension loaded by WebUI: Screen rail + phone-nav entries", has(A, ".rail .hdo-rail") and has(A, ".sidebar-nav .hdo-nav"))
 
-    # ── before consent ──
+    # ── no manual approval: enabling the plugin was the consent; the first page load approved it through WebUI ──
     js(A, "window.__hermesTakeover.open()")
-    A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent!=='Connecting…'", 20)
-    check("before approval the page explains the one-time step", "allow takeover" in state_text(A).lower(), state_text(A))
+    A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent==='Screen is off'", 40)
+    check("approved automatically on first load: the Screen page works with no clicks", True)
+    consents = A.eval("fetch('/api/extensions/status',{credentials:'same-origin'}).then(r=>r.json()).then(j=>JSON.stringify(j))", True)
+    check("...through WebUI's own consent (recorded by WebUI, token minted)", '"takeover"' in consents and os.path.exists(os.path.join(STATE, "sidecar-auth", "takeover.token")))
+    marker = json.load(open(os.path.join(STATE, "extensions", "takeover", "assets", "autoconsent.json")))
+    check("...and only once (marker switched off, record kept)", marker == {"auto": False} and os.path.exists(os.path.join(STATE, "takeover-autoconsent.json")), str(marker))
+
+    # ── a revoke in WebUI is respected: no automatic re-approval; the page offers the guided manual step ──
+    A.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:false})}).then(r=>r.status)", True)
+    A.call("Page.reload"); time.sleep(1)
+    A.wait("!!window.__hermesTakeover", 40)
+    js(A, "window.__hermesTakeover.open()")
+    A.wait("/allow takeover/i.test(document.querySelector('#mainTakeover [data-f=state]').textContent)", 30)
+    check("after you revoke it in WebUI, it stays revoked and the page explains the one step", "allow takeover" in state_text(A).lower(), state_text(A))
     A.screenshot(f"{SHOTS}/1-needs-approval.png")
 
-    # ── the one manual step, as a user does it: "Allow Takeover" -> WebUI's own highlighted consent button ──
+    # ── the guided manual step: "Allow Takeover" -> WebUI's own highlighted consent button ──
     check("the page offers a one-tap 'Allow Takeover'", has(A, "#mainTakeover [data-f=approve]"))
     clk(A, "#mainTakeover [data-f=approve]")
     A.wait("!!document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')", 20)
@@ -113,12 +122,11 @@ try:
     check("it lands on WebUI's own consent button for Takeover, highlighted",
           (A.eval("(document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')||{}).textContent") or "").strip().lower().startswith("approve"))
     A.screenshot(f"{SHOTS}/1b-approval-highlighted.png")
-    A.eval("document.querySelector('[data-extension-sidecar-proxy-id=\"takeover\"]').click()")
-    A.wait("window.__hermesTakeover.state().active", 20)
+    A.eval("document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]').click()")
+    A.wait("window.__hermesTakeover.state().active && document.querySelector('#mainTakeover [data-f=state]').textContent==='Screen is off'", 30)
     check("after the user approves, the Screen page comes back by itself", A.eval("window.__hermesTakeover.state().active"))
 
     check("after consent the sidecar refuses a wrong token (401)", raw(f"http://127.0.0.1:{PORT}/api/status", headers={"X-Hermes-Sidecar-Token": "nope"}) == 401)
-    A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent==='Screen is off'", 30)
     check("after approval: screen off on a fresh home, Start offered", has(A, "#mainTakeover [data-f=start]"))
     A.screenshot(f"{SHOTS}/2-off.png")
 
@@ -389,6 +397,10 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     G.wait("document.querySelectorAll('.plugin-card[data-plugin=\"takeover\"]').length > 0", 30)
     cards = G.eval("[...document.querySelectorAll('.plugin-card[data-plugin=\"takeover\"]')].map(c=>c.textContent.replace(/\\s+/g,' ').slice(0,160))")
     check("Settings -> Plugins lists Takeover", len(cards) >= 1, str(cards))
+    G.wait("!!document.querySelector('.hdo-plugin-card [data-c=status]') && !/Checking/.test(document.querySelector('.hdo-plugin-card [data-c=status]').textContent)", 20)
+    check("...as ONE visible card with live status (the sandboxed dashboard-tab duplicate is hidden)",
+          G.eval("[...document.querySelectorAll('#pluginsList .plugin-card')].filter(c=>/takeover/i.test(c.dataset.plugin||'') && c.offsetParent).length") == 1,
+          G.eval("document.querySelector('.hdo-plugin-card [data-c=status]').textContent"))
     G.wait("!!document.querySelector('.plugin-card[data-plugin=\"takeover\"] [data-hdo-open]')", 15)
     G.screenshot(f"{SHOTS}/13-plugins-tab.png")
     G.eval("document.querySelector('.plugin-card[data-plugin=\"takeover\"] [data-hdo-open]').click()")
@@ -402,7 +414,7 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     js(G, "window.__hermesTakeover.close()"); time.sleep(1)
     G.eval("switchPanel('settings')"); time.sleep(1.5); G.eval("switchSettingsSection('plugins')")
     G.wait("!!document.querySelector('.plugin-card[data-plugin=\"takeover\"] a.plugin-open-btn')", 30)
-    G.eval("document.querySelector('.plugin-card[data-plugin=\"takeover\"] a.plugin-open-btn').click()")
+    G.eval("document.querySelector('.plugin-card[data-plugin=\"takeover\"] a.plugin-open-btn').click()")      # even if reached
     G.wait("window.__hermesTakeover.state().active", 20)
     check("WebUI's own plugin open button lands on the live Screen page, not the sandboxed copy",
           G.eval("window.__hermesTakeover.state().active && !document.querySelector('#pluginPageContainer iframe')"))

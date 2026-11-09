@@ -31,3 +31,7 @@ config_schema:
     type: bool
     default: true
     description: "When a browser result shows a step only you should do (sign-in, approve/authorize, 2FA code, payment, CAPTCHA), remind the agent to call request_takeover instead of doing it."
+  webui_auto_approve:
+    type: bool
+    default: true
+    description: "Enabling the plugin is your consent: its hermes-webui Screen page approves its own service in WebUI once (WebUI must have a password set). Revoking it later in WebUI sticks. Set false to approve by hand."

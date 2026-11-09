@@ -33,6 +33,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 SRC = PLUGIN_ROOT / "webui"
 NOVNC = PLUGIN_ROOT / "dashboard" / "dist" / "novnc"
 INSTALL_MANIFEST = "extension-install-manifest.json"
+AUTOCONSENT_RECORD = "takeover-autoconsent.json"       # in WebUI's state dir: survives reinstalls / upgrades
 
 
 # ── detection ─────────────────────────────────────────────────────────────────
@@ -97,6 +98,7 @@ def install_extension(sd: Optional[Path] = None) -> Dict[str, Any]:
         if isinstance(ext.get("sidecar"), dict):
             ext["sidecar"]["origin"] = f"http://127.0.0.1:{port()}"
     man_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (dest / "assets" / "autoconsent.json").write_text(json.dumps(autoconsent_marker(sd)), encoding="utf-8")
     files = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
     old = sd / "extensions" / f".{PLUGIN_ID}.old-{os.getpid()}"
     if final.exists():
@@ -196,6 +198,31 @@ def status(home) -> Dict[str, Any]:
             "sidecar": bool(h), "sidecar_version": (h or {}).get("version"), "enabled": enabled(),
             "serves_this_profile": bool(h) and (bool(h.get("multi_profile")) or not h.get("home_id")
                                                 or h["home_id"] == home_id(home))}
+
+
+def auto_approve_allowed() -> bool:
+    """``plugins.entries.takeover.settings.webui_auto_approve`` (default on): enabling the plugin is your consent for
+    its Screen page to use its own service, so the page grants WebUI's sidecar consent itself, ONCE per WebUI."""
+    return bool(compat.setting("webui_auto_approve", True))
+
+
+def autoconsent_marker(sd: Path) -> Dict[str, Any]:
+    """What the page reads (``assets/autoconsent.json``): approve once, unless already done (so a later revoke sticks)."""
+    import secrets
+    if not auto_approve_allowed() or state.read_json(sd / AUTOCONSENT_RECORD):
+        return {"auto": False}
+    return {"auto": True, "nonce": secrets.token_hex(8)}
+
+
+def mark_autoconsent_used(sd: Path, nonce: str) -> bool:
+    """Called by the service after the page approved: record it and switch the marker off."""
+    if not isinstance(nonce, str) or not nonce or len(nonce) > 64:
+        return False
+    state.write_json(sd / AUTOCONSENT_RECORD, {"used_nonce": nonce, "at": time.time()})
+    marker = sd / "extensions" / PLUGIN_ID / "assets" / "autoconsent.json"
+    if marker.parent.is_dir():
+        marker.write_text(json.dumps({"auto": False}), encoding="utf-8")
+    return True
 
 
 def enabled() -> bool:

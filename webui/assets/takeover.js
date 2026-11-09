@@ -7,6 +7,11 @@ function __hermesTakeoverWebuiProfile() {
   try { return (typeof S !== 'undefined' && S && typeof S.activeProfile === 'string' && S.activeProfile.trim()) || 'default'; }
   catch (_) { return 'default'; }
 }
+// WebUI's own request helper (global `api` in WebUI's scripts), for WebUI's own endpoints.
+function __hermesTakeoverWebuiPost(path, body) {
+  if (typeof api !== 'function') return Promise.reject(new Error('WebUI api() not found'));
+  return api(path, { method: 'POST', body: JSON.stringify(body), redirect401: false, retries: 0, timeoutToast: false });
+}
 (() => {
   'use strict';
   if (window.__hermesTakeover) return;
@@ -439,6 +444,8 @@ function __hermesTakeoverWebuiProfile() {
     if (e) {
       if (e.error === 'incompatible') return { dot: 'err', text: 'Hermes changed under Takeover', hint: e.message };
       if (e.error === 'not_installed') return { dot: 'off', text: 'Takeover is not installed in the "' + prof() + '" profile', hint: 'Install it there with: hermes -p ' + prof() + ' plugins install shoumikgoswami/Hermes-takeover --enable' };
+      if ((e.http === 401 || e.http === 403 || e.http === 503) && AC.error === 'nopassword') return { dot: 'wait', text: 'Set a WebUI password to finish', hint: 'WebUI only lets extensions use a service when it has a password (Settings → Password). Set one and reload; Takeover then connects by itself.' };
+      if ((e.http === 401 || e.http === 403 || e.http === 503) && (!AC.tried || AC.busy)) return { dot: 'wait', text: 'Connecting…' };
       if (e.http === 401 || e.http === 403 || e.http === 503) return { dot: 'wait', text: 'One step: allow Takeover in WebUI', approve: true, hint: 'WebUI asks you once before an extension may use its service. Tap "Allow Takeover", then tap "Approve proxy consent" on the highlighted row; this page continues by itself. (WebUI needs a password set for this: Settings → Password.)' };
       return { dot: 'err', text: 'Takeover service is not running', hint: 'It starts with your next agent chat. To start it now run: hermes takeover setup', };
     }
@@ -722,7 +729,8 @@ function __hermesTakeoverWebuiProfile() {
       const r = await api('/api/pulse', { viewer_id: S.viewer }, { timeout: 6000 });
       if (r.ok && r.lease) {
         G.delay = 5000;
-        renderSide(r);
+        if (AC.pending) markApproved();
+        renderSide(r); renderPluginCard(r);
         const own = r.request && r.request.status === 'pending' ? r.request : null;
         const other = !own && Array.isArray(r.elsewhere) && r.elsewhere.length ? r.elsewhere[0] : null;
         const req = own || (other ? { status: 'pending', reason: other.reason, profile: other.profile } : null);
@@ -815,6 +823,40 @@ function __hermesTakeoverWebuiProfile() {
     }, 400);
   }
 
+  // ── automatic approval (once) ─────────────────────────────────────────────
+  // Enabling the plugin is the consent: the first time this page loads after install it grants WebUI's sidecar consent
+  // through WebUI's own endpoint (which still refuses when WebUI has no password, and mints the token itself), then
+  // tells the service it is done so a later "Revoke" in WebUI is respected. Opt out: webui_auto_approve: false.
+  const AC = { tried: false, busy: false, pending: null, error: null };
+  async function autoApprove() {
+    if (AC.tried) return; AC.tried = true; AC.busy = true;
+    try { await autoApproveInner(); } finally { AC.busy = false; }
+  }
+  async function autoApproveInner() {
+    let m = null;
+    try { m = await (await fetch(ASSETS + 'autoconsent.json', { cache: 'no-store', credentials: 'same-origin' })).json(); } catch (_) { return; }
+    if (!m || !m.auto || !m.nonce) return;
+    const probe = await api('/api/pulse', {}, { timeout: 5000 });
+    if (!probe.ok) {
+      try {
+        await __hermesTakeoverWebuiPost('/api/extensions/sidecar-proxy-consent', { id: 'takeover', approved: true });
+      } catch (e) {
+        AC.error = String((e && e.message) || e);
+        if (/password|authenticat/i.test(AC.error)) AC.error = 'nopassword';
+        return;
+      }
+    }
+    AC.pending = m.nonce;
+    await markApproved();
+    if (S.active) schedule(0);
+    setTimeout(globalTick, 300);
+  }
+  async function markApproved() {
+    if (!AC.pending) return;
+    const r = await api('/api/autoconsent-used', { nonce: AC.pending });
+    if (r.ok) AC.pending = null;
+  }
+
   /** Answer a request that came from another profile than the one WebUI is showing. */
   function answerElsewhere(profile) {
     S.target = profile && profile !== __hermesTakeoverWebuiProfile() ? profile : null;
@@ -825,18 +867,66 @@ function __hermesTakeoverWebuiProfile() {
   // WebUI lists Takeover there twice when it is installed in WebUI's own Hermes home: the Hermes plugin (tool, hooks)
   // and its dashboard tab, which WebUI can only show in a sandboxed iframe without a backend. Point both at the real
   // Screen page this extension provides.
+  // Settings -> Plugins shows Takeover as a plugin, whatever profile it is installed in and before any WebUI restart.
+  // WebUI's own list only covers WebUI's own Hermes home, and also lists the plugin's dashboard tab ("Screen") which
+  // WebUI can only open in a sandbox without a backend: that duplicate is hidden, the real card points at Screen.
+  let lastPulse = null;
+  function pluginCardHtml() {
+    return '<div class="provider-card-header plugin-card-header"><div class="provider-card-info">' +
+      '<div class="provider-card-name">Takeover</div><div class="provider-card-meta">takeover · v0.4.0</div></div>' +
+      '<span class="provider-card-badge" data-c="badge">Enabled</span></div>' +
+      '<div class="provider-card-body plugin-card-body">' +
+      '<div class="provider-card-hint">When a step needs you (sign in, approve or authorize, a 2FA code, a CAPTCHA, a payment), the agent asks and you tap Take over. Do it in the agent\'s browser, then hand back.</div>' +
+      '<div class="hdo-plugin-status" data-c="status">Checking…</div>' +
+      '<div class="plugin-card-footer hdo-plugin-row"><button type="button" class="plugin-open-btn" data-hdo-open="1">Open Screen</button>' +
+      '<span class="hdo-plugin-note">Feedback: <a href="mailto:hello@shoumikgoswami.com?subject=Takeover%20plugin%20feedback">hello@shoumikgoswami.com</a></span></div></div>';
+  }
+  function renderPluginCard(p) {
+    if (p) lastPulse = p;
+    const card = document.querySelector('.hdo-plugin-card');
+    if (!card) return;
+    const st = card.querySelector('[data-c=status]');
+    if (!st) return;
+    if (!lastPulse) { st.textContent = AC.error === 'nopassword' ? 'Waiting for a WebUI password (Settings → Password).' : 'Service: connecting…'; return; }
+    const req = lastPulse.request && lastPulse.request.status === 'pending' ? lastPulse.request : null;
+    const lease = lastPulse.lease || {};
+    st.textContent = 'Profile: ' + (lastPulse.profile || prof()) + ' · ' +
+      (req ? 'the agent needs you: ' + req.reason : lease.holder === 'human' ? 'you have control' : 'the agent is driving');
+  }
   function decoratePluginCards() {
-    document.querySelectorAll('.plugin-card[data-plugin="takeover"]').forEach((card) => {
-      if (card.querySelector('[data-hdo-open]')) return;
-      const body = card.querySelector('.plugin-card-body') || card;
-      const row = document.createElement('div'); row.className = 'plugin-card-footer hdo-plugin-row';
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'plugin-open-btn'; b.dataset.hdoOpen = '1';
-      b.textContent = 'Open Screen';
-      b.addEventListener('click', (e) => { e.preventDefault(); onNavClick(true); });
-      const note = document.createElement('span'); note.className = 'hdo-plugin-note';
-      note.textContent = 'Live view + one-tap Take over (served by the Takeover extension).';
-      row.appendChild(b); row.appendChild(note); body.appendChild(row);
+    const list = document.getElementById('pluginsList');
+    if (!list || list.style.display === 'none' && !list.children.length) return;
+    // hide the dashboard-tab duplicate (it has WebUI's own tab link / enable toggle)
+    list.querySelectorAll('.plugin-card[data-plugin="takeover"]').forEach((c) => {
+      if (c.classList.contains('hdo-plugin-card')) return;
+      if (c.querySelector('.plugin-enable-toggle') || c.querySelector('a.plugin-open-btn')) c.style.display = 'none';
+      else c.classList.add('hdo-plugin-native');
     });
+    // one Takeover card: decorate WebUI's own (agent plugin) card, or add ours when WebUI does not list it
+    const native = list.querySelector('.plugin-card.hdo-plugin-native');
+    let card = list.querySelector('.hdo-plugin-card');
+    if (native && !card) {
+      native.classList.add('hdo-plugin-card');
+      const body = native.querySelector('.plugin-card-body') || native;
+      const extra = document.createElement('div');
+      extra.innerHTML = '<div class="hdo-plugin-status" data-c="status">Checking…</div>' +
+        '<div class="plugin-card-footer hdo-plugin-row"><button type="button" class="plugin-open-btn" data-hdo-open="1">Open Screen</button>' +
+        '<span class="hdo-plugin-note">Feedback: <a href="mailto:hello@shoumikgoswami.com?subject=Takeover%20plugin%20feedback">hello@shoumikgoswami.com</a></span></div>';
+      while (extra.firstChild) body.appendChild(extra.firstChild);
+      card = native;
+    } else if (!native && !card) {
+      card = document.createElement('div');
+      card.className = 'provider-card plugin-card hdo-plugin-card'; card.dataset.plugin = 'takeover-ext';
+      card.innerHTML = pluginCardHtml();
+      list.insertBefore(card, list.firstChild);
+      list.style.display = '';
+      const empty = document.getElementById('pluginsEmpty'); if (empty) empty.style.display = 'none';
+    }
+    const b = card && card.querySelector('[data-hdo-open]');
+    if (b && !b.dataset.bound) { b.dataset.bound = '1'; b.addEventListener('click', (e) => { e.preventDefault(); onNavClick(true); }); }
+    renderPluginCard();
+    const tab = document.querySelector('[data-settings-section="plugins"]');
+    if (tab && tab.style.display === 'none') tab.style.display = '';     // never hide Plugins while Takeover is installed
   }
   function watchPluginsPanel() {
     decoratePluginCards();
@@ -864,7 +954,7 @@ function __hermesTakeoverWebuiProfile() {
   function install(attempt) {
     attempt = attempt || 0;
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
-      mount(); wrapCore(); watchPluginsPanel();
+      mount(); wrapCore(); watchPluginsPanel(); autoApprove();
       window.__hermesTakeover = {
         version: '0.4.0', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,

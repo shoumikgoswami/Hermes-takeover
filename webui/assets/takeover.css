@@ -100,3 +100,5 @@ main.main.showing-x-takeover > #mainTakeover { display: flex; }
 @keyframes hdo-approve { 50% { outline-color: rgba(31,111,235,.25); } }
 
 .hdo-prof { margin-left: 8px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid #d29922; color: #d29922; }
+
+.hdo-plugin-status { font-size: 12px; margin: 6px 0 2px; opacity: .85; }

@@ -391,6 +391,11 @@ class App:
             return jr({"ok": True, "lease": control.hand_back(home, vid)})
         if path == "/api/force-hand-back":
             return jr({"ok": True, "lease": control.force_hand_back(home)})
+        if path == "/api/autoconsent-used":
+            from . import webui
+            sd = webui.state_dir()
+            ok = bool(sd) and webui.mark_autoconsent_used(sd, str(payload().get("nonce") or ""))
+            return jr({"ok": ok})
         if path == "/api/dismiss":
             control.dismiss_request(home)
             return jr({"ok": True})
