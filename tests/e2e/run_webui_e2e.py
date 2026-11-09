@@ -109,6 +109,7 @@ try:
     A.wait("!!document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')", 20)
     time.sleep(2)                                  # let WebUI finish re-rendering the panel: the mark must survive it
     A.wait("!!document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')", 10)
+    check("...on the Diagnostics tab, actually visible", A.eval("!!document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]').offsetParent"))
     check("it lands on WebUI's own consent button for Takeover, highlighted",
           (A.eval("(document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')||{}).textContent") or "").strip().lower().startswith("approve"))
     A.screenshot(f"{SHOTS}/1b-approval-highlighted.png")
@@ -424,6 +425,10 @@ m.state.create_request({P2!r}, 'Sign in to the p2 account')
         H.eval("document.querySelector('.hdo-global-take').click()")
         H.wait("window.__hermesTakeover.state().active && window.__hermesTakeover.profile()==='p2'", 20)
         check("one tap opens the Screen page for THAT profile", H.eval("window.__hermesTakeover.profile()") == "p2")
+        H.wait("document.querySelector('#mainTakeover [data-f=state]').textContent!=='Connecting…'", 30)
+        check("...labelled with the profile, and talking to p2's own Hermes home",
+              H.eval("document.querySelector('#mainTakeover [data-f=prof]').textContent") == "profile: p2" and
+              H.eval("fetch('/api/extensions/takeover/sidecar/api/status?profile=p2',{credentials:'same-origin'}).then(r=>r.json()).then(j=>j.hermes_home)", True).endswith("/profiles/p2"))
         H.screenshot(f"{SHOTS}/14-other-profile.png")
         H.call("Page.close")
 finally:

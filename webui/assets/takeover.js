@@ -153,7 +153,8 @@ function __hermesTakeoverWebuiProfile() {
   // ── DOM ───────────────────────────────────────────────────────────────────
   function pageHtml() {
     return '<div class="hdo-wrap">' +
-      '<div class="hdo-head"><div class="hdo-state"><span class="hdo-dot" data-f="dot"></span><span data-f="state" role="status" aria-live="polite">Connecting…</span></div>' +
+      '<div class="hdo-head"><div class="hdo-state"><span class="hdo-dot" data-f="dot"></span><span data-f="state" role="status" aria-live="polite">Connecting…</span>' +
+      '<span class="hdo-prof" data-f="prof" hidden></span></div>' +
       '<div class="hdo-actions"><button type="button" class="hdo-btn" data-f="start" hidden>Start screen</button>' +
       '<button type="button" class="hdo-btn" data-f="setup" hidden>Run setup</button>' +
       '<button type="button" class="hdo-btn hdo-primary" data-f="approve" hidden>Allow Takeover</button>' +
@@ -466,6 +467,7 @@ function __hermesTakeoverWebuiProfile() {
     const setup = (st && st.setup) || {}; const req = st && st.request;
     const ready = !!r.ready; const running = ready && !!scr.running && !S.err;
     F.dot.dataset.s = info.dot; setText(F.state, info.text);
+    setText(F.prof, 'profile: ' + prof()); setHidden(F.prof, !S.target);
     setHidden(F.start, !(st && !S.err && ready && !scr.running && !scr.starting && !S.starting));
     setHidden(F.setup, !(info.retry && !ready));
     setHidden(F.approve, !info.approve);
@@ -780,12 +782,18 @@ function __hermesTakeoverWebuiProfile() {
     const t0 = Date.now(); S.approving = t0;
     await window.switchPanel('settings');
     if (typeof switchSettingsSection === 'function') switchSettingsSection('extensions');
+    const diagTab = () => {                              // the sidecar rows live on Extensions -> Diagnostics
+      if (typeof switchExtensionsTab === 'function') { try { switchExtensionsTab('diagnostics'); return; } catch (_) { /* fall back */ } }
+      const b = document.querySelector('[data-extensions-tab="diagnostics"]'); if (b) b.click();
+    };
+    diagTab();
     let scrolled = false, lastPoll = 0, told = false;
     // WebUI re-renders this panel as its data loads, so keep (re)marking the row until the service answers, then go back.
     const iv = setInterval(async () => {
       if (S.approving !== t0 || Date.now() - t0 > 180000) { clearInterval(iv); return; }
       const btn = document.querySelector('[data-extension-sidecar-proxy-id="takeover"]');
-      if (btn) {
+      if (btn && !btn.offsetParent && !scrolled) diagTab();        // still on another tab: show Diagnostics
+      if (btn && btn.offsetParent) {
         for (let el = btn.parentElement; el; el = el.parentElement) {
           if (el.tagName === 'DETAILS' && !el.open) el.open = true;
         }
