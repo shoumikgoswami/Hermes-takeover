@@ -1,7 +1,7 @@
 name: takeover
-version: 0.4.1
+version: 0.5.0
 manifest_version: 2
-description: "When a step needs you (sign-in, approve or authorize, 2FA code, CAPTCHA, payment), the agent asks and you tap Take over in hermes-webui or the Hermes dashboard, even on your phone. Do it in the agent's browser, hand back, and it carries on."
+description: "When a step needs you (sign-in, approve or authorize, 2FA code, CAPTCHA, payment), the agent asks and you tap Take over in hermes-webui, the Hermes dashboard or Hermes Desktop (alert + Screen pane), even on your phone. Do it in the agent's browser, hand back, and it carries on."
 author: Shoumik Goswami
 homepage: https://github.com/shoumikgoswami/Hermes-takeover
 license: MIT

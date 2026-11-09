@@ -274,7 +274,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     '<li>You type passwords straight into the browser, never into chat.</li>' +
     '<li>Left without handing back? Use Force hand-back on the Screen page, or <code>/takeover release</code>.</li></ul>' +
     '<div class="hdo-side-foot">Feedback or ideas? <a href="mailto:' + FEEDBACK + '?subject=Takeover%20plugin%20feedback">' + FEEDBACK + '</a>' +
-    '<div class="hdo-side-ver">Takeover 0.4.1</div></div>' +
+    '<div class="hdo-side-ver">Takeover 0.5.0</div></div>' +
     '</div>';
 
   function renderSide(p) {
@@ -911,7 +911,7 @@ function __hermesTakeoverWebuiPost(path, body) {
   let lastPulse = null;
   function pluginCardHtml() {
     return '<div class="provider-card-header plugin-card-header"><div class="provider-card-info">' +
-      '<div class="provider-card-name">Takeover</div><div class="provider-card-meta">takeover · v0.4.1</div></div>' +
+      '<div class="provider-card-name">Takeover</div><div class="provider-card-meta">takeover · v0.5.0</div></div>' +
       '<span class="provider-card-badge" data-c="badge">Enabled</span></div>' +
       '<div class="provider-card-body plugin-card-body">' +
       '<div class="provider-card-hint">When a step needs you (sign in, approve or authorize, a 2FA code, a CAPTCHA, a payment), the agent asks and you tap Take over. Do it in the agent\'s browser, then hand back.</div>' +
@@ -1001,7 +1001,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
       mount(); wrapCore(); watchPluginsPanel(); autoApprove();
       window.__hermesTakeover = {
-        version: '0.4.1', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
+        version: '0.5.0', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
         profile: () => prof(),
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,

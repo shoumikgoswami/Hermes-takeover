@@ -8,4 +8,10 @@ bad = 0
 for f in sorted(here.glob("test_*.py")):
     print(f"== {f.name}", flush=True)
     bad |= subprocess.call([sys.executable, "-W", "ignore", "-m", "unittest", "discover", "-s", str(here), "-p", f.name])
+import shutil
+if shutil.which("node"):
+    print("== desktop/run.mjs (Hermes Desktop half, mocked SDK)", flush=True)
+    bad |= subprocess.call(["node", "--import", "./tests/desktop/register.mjs", "tests/desktop/run.mjs"], cwd=str(here.parent))
+else:
+    print("== desktop half skipped: node not found")
 sys.exit(1 if bad else 0)

@@ -5,7 +5,7 @@
 Signing in, typing a password, approving or authorizing an app ("Allow access", OAuth consent, "Approve sign-in"),
 entering a 2FA code, clearing a CAPTCHA, confirming a payment: Hermes stops and calls `request_takeover("Sign in to
 GitHub and approve the Hermes app")`. A banner with a one-tap **Take over** button appears on every page of
-**hermes-webui** and the **Hermes dashboard** (works from a phone). One tap opens the live view of the agent's Chrome and
+**hermes-webui**, the **Hermes dashboard** and **Hermes Desktop** (WebUI and the dashboard work from a phone). One tap opens the live view of the agent's Chrome and
 gives you control. Do the step in that same browser and tap **Hand back**. The agent's waiting tool call returns by
 itself and it carries on, signed in.
 
@@ -26,6 +26,8 @@ once** (WebUI loads extensions when a page loads) and the **Screen** button is i
 |---|---|
 | **hermes-webui** | A **Screen** button in the side rail (phone: bottom nav); while the agent is asking, a banner on every page with **Take over** (one tap) and **Just watch**; a **Takeover** card in **Settings → Plugins** with live status and **Open Screen**. `<webui>/#takeover` opens it too. |
 | **Hermes dashboard** (`hermes dashboard`) | A **Screen** tab and the same banner (one-tap **Take over** = `/takeover?take=1`). Restart the dashboard once if it was already running. |
+| **Hermes Desktop** | An in-app alert with the reason, a native notification when Hermes is in the background, an **Agent needs you** chip in the status bar until it is answered, and a **Takeover** palette command. You take over in Desktop's own **Screen** pane (Agents, then the agent, then Screen, then **Take over**); it shares the lease this plugin waits on, so **Hand back** there lets the agent continue. See [Hermes Desktop](#hermes-desktop-and-other-hermes-products). |
+| **Terminal, messaging apps** (`hermes`, Telegram, Discord, Slack, ...) | Nothing to look at there, so on a messaging platform the agent is told to message you first (what it needs, where to go), then waits. Open WebUI, the dashboard or Desktop to take over. |
 
 ### What "first run" does (automatically, once)
 
@@ -132,6 +134,28 @@ byte rides WebUI's authenticated proxy, no ticket, extra port or CSP change is n
   refreshes when WebUI restarts; Takeover's page adds its card there itself, so it shows wherever it is installed. WebUI
   would also list the plugin's dashboard tab as "Screen" (a sandboxed page with no backend); that duplicate is hidden.
 
+## Hermes Desktop and other Hermes products
+
+| Product | What works | How it is wired |
+|---|---|---|
+| **hermes-webui** | Everything: Screen page, live view, banner, phone gestures, Plugins card. | Extension + loopback service (see above). Tested end to end (60 checks). |
+| **Hermes dashboard** | Everything: Screen tab, live view, banner. | Dashboard plugin (`dashboard/`). Tested end to end against a real dashboard, real Xvnc and Chromium (25 checks). |
+| **Hermes Desktop** | The agent's request reaches you (alert, native notification, status-bar chip, palette command); taking over uses Desktop's own Screen pane. | `desktop/plugin.js` (loaded by Desktop with the plugin, no separate install) listens to `plugin.takeover.request` / `ended`, which the tool emits through Hermes' public `plugin_events` door. The tool, the lease and the fence run unchanged. |
+| **Terminal** (`hermes`, `hermes chat`) | The agent can ask and wait; take over from any of the screens above. | Nothing to show in a terminal. |
+| **Messaging platforms** | The agent is told to message you first, then waits. | `request_takeover` returns `requested_tell_user` once per conversation; the second call waits. |
+
+Desktop notes:
+- The Desktop half is a separate switch in Desktop (**Capabilities → Plugins**, "Takeover"); Hermes ships Desktop halves of
+  installed packages opt-in, so enable it there once. The agent half works without it (the agent still asks and waits; you
+  just are not alerted in the app).
+- It does not draw the screen itself: Desktop's Screen pane is part of its Bots feature and has no public SDK entry, so
+  the alert points you there instead of duplicating a viewer. Against a **remote** backend Desktop cannot copy the half
+  from the remote machine's plugins folder; install it from Git with the Desktop target checked.
+- The alert is also polled every 15 s (`/api/plugins/takeover/pulse`), so a window opened after the request was posted
+  still shows it.
+- Not tested against a running Desktop app here (no Electron on this server): the Desktop half is tested against the
+  documented SDK contract with a mocked SDK (`tests/desktop/`), not inside the app.
+
 ## Requirements and limits
 
 - Hermes with Bot Desktop (`tools.bot_desktop`). The plugin verifies the symbols it uses and says so if a Hermes update changed
@@ -151,12 +175,14 @@ plugin.yaml  __init__.py  sidecar_run.py   tool, CLI, /takeover, hooks, prompt s
 takeover_core/  compat (hermes-agent seam) · setup (first run) · control (lease ops) · state · tickets · bridge (dashboard WS)
                 sidecar (hermes-webui backend + long-poll stream) · webui (install extension, keep service up) · tool · cli
                 fence (pre_tool_call veto while you drive) · nudge (prompt section + "ask the user" hint on browser results)
+                surfaces (events to Desktop, messaging-platform detour)
 dashboard/      manifest.json · plugin_api.py (routes + WebSocket) · dist/ (index.js, style.css, novnc/ 1.6.0 vendored)
+desktop/        plugin.js (Hermes Desktop half: alert, notification, status-bar chip; no JSX, SDK-only imports)
 webui/          manifest.json · assets/takeover.js + takeover.css + touch.js (phone gestures)   (noVNC is copied in from dashboard/dist at install)
 skills/takeover/SKILL.md
-tests/          test_core.py (54) · test_sidecar.py (35) · test_hermes_integration.py (6: through Hermes's own plugin loader,
+tests/          test_core.py (65) · test_sidecar.py (43) · desktop/ (10, node, mocked SDK) · test_hermes_integration.py (6: through Hermes's own plugin loader,
                 hook dispatch, prompt rendering, `plugins doctor --ci`, `plugins validate`, first run right after install)
-                e2e/run_e2e.py (dashboard, 25) · e2e/run_webui_e2e.py (WebUI, 60) via e2e/fresh_webui_e2e.sh (scratch home + 2nd profile + scratch WebUI)
+                e2e/run_e2e.py (dashboard, 25) via e2e/fresh_dashboard_e2e.sh · e2e/run_webui_e2e.py (WebUI, 60) via e2e/fresh_webui_e2e.sh (scratch homes)
 ```
 
 ## Tests
@@ -168,7 +194,7 @@ validate warning is the private Bot Desktop / interrupt imports, which have no p
 
 ```bash
 V=<hermes venv python>
-$V tests/run_all.py          # unit + Hermes-integration tests, each file in its own process (commit first: install clones git)
+$V tests/run_all.py          # unit + Hermes-integration + Desktop-half tests, each in its own process (commit first: install clones git)
 # end to end, scratch homes (touches nothing real). WebUI:
 S=$(mktemp -d); W=$(mktemp -d)
 HERMES_HOME=$S hermes plugins install file://$PWD --enable --yes-deps

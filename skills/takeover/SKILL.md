@@ -5,7 +5,7 @@ description: "Use when a browser step needs the human (sign-in, approve/authoriz
 
 # Takeover: asking the human to take over the screen
 
-The user can open the **Screen** page in hermes-webui or the Hermes dashboard (works from a phone), see your Chrome live, tap
+The user can open the **Screen** page in hermes-webui, the Hermes dashboard or Hermes Desktop (WebUI and the dashboard work from a phone), see your Chrome live, tap
 **Take over**, do the step, and **Hand back**. What they do happens in *your* browser profile, so a login they
 complete is *your* login.
 
@@ -24,6 +24,9 @@ strong signal, but you decide (ignore it if the page does not actually need the 
 1. Call `request_takeover(reason="<one sentence: exactly what to do>")`. Example reasons: "Sign in to GitHub and approve the Hermes app", "Enter the SMS code for your bank login". The user gets a one-tap Take over button.
 2. The call **waits** until the human hands control back. You do not need them to say "done". Hermes caps one tool call at a few
    minutes: on `still_waiting`, call `request_takeover` again with the same reason (it joins the same request, no second card).
+   On a messaging platform (Telegram, Discord, Slack, ...) the first call returns `requested_tell_user` at once: **message the user
+   in that chat now** (what to do, and that they open WebUI, the dashboard or Desktop and tap Take over), then call
+   `request_takeover` again with the same reason to wait.
 3. Result `completed`: take a **fresh screenshot/snapshot first**, the page has changed, then continue.
 4. Result `timeout` / `still_with_human` / `dismissed` (or `still_waiting` after you have re-called a few times): tell the user plainly what you are waiting for and **stop the turn**.
    Do not retry in a loop.
