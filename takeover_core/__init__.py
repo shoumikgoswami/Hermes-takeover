@@ -11,7 +11,7 @@ import importlib
 __version__ = "0.4.1"
 PLUGIN_ID = "takeover"
 
-_SUBMODULES = ("compat", "state", "setup", "tickets", "control", "bridge", "sidecar", "webui", "tool", "cli", "fence", "nudge", "bootstrap")
+_SUBMODULES = ("compat", "state", "setup", "tickets", "control", "bridge", "sidecar", "webui", "tool", "cli", "fence", "nudge", "bootstrap", "surfaces")
 
 
 def __getattr__(name):          # lazy: the CLI never needs the bridge, the bridge never needs argparse

@@ -124,6 +124,20 @@ def join_request(home, reason: str, waiter: Optional[str] = None):
     return r, waiter
 
 
+def told(home, rid: str, who: str) -> bool:
+    """Has this conversation already been sent to tell the user about request ``rid``?"""
+    r = get_request(home)
+    return bool(r and r.get("id") == rid and who in (r.get("told") or []))
+
+
+def mark_told(home, rid: str, who: str) -> None:
+    with _locked(home):
+        r = get_request(home)
+        if r and r.get("id") == rid and who not in (r.get("told") or []):
+            r["told"] = ((r.get("told") or []) + [who])[-8:]
+            write_json(data_dir(home) / "request.json", r)
+
+
 def heartbeat(home, rid: str, waiter: str) -> None:
     with _locked(home):
         r = get_request(home)

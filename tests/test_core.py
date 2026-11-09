@@ -361,10 +361,13 @@ class TestTool(Base):
         core.setup.ensure_ready = lambda home, timeout=0: {"ready": True, "headed": True}
         self._start = core.control.start_screen
         core.control.start_screen = lambda home: {"running": True}
+        self._bc = core.surfaces.broadcast
+        core.surfaces.broadcast = lambda event, payload: False       # no test talks to a real event bridge
 
     def tearDown(self):
         core.setup.ensure_ready = self._ready
         core.control.start_screen = self._start
+        core.surfaces.broadcast = self._bc
 
     def call(self, **args):
         return json.loads(core.tool.handle(args))
@@ -453,6 +456,104 @@ class TestTool(Base):
         core.control.dismiss_request(HOME)
         t2.join(10)
         self.assertEqual(res["b"]["status"], "dismissed")
+
+    # ── other Hermes surfaces ─────────────────────────────────────────────────────
+    def events(self):
+        got = []
+        core.surfaces.broadcast = lambda event, payload: got.append((event, payload)) or True     # restored by tearDown
+        return got
+
+    def test_desktop_is_told_when_a_request_opens_and_when_it_is_over(self):
+        got = self.events()
+        self.human(1.2, 1.2)
+        self.assertEqual(self.call(reason="Enter the SMS code", wait_seconds=30)["status"], "completed")
+        kinds = [e for e, _ in got]
+        self.assertEqual(kinds[0], "request"); self.assertEqual(kinds[-1], "ended")
+        self.assertEqual(got[0][1]["reason"], "Enter the SMS code")
+        self.assertEqual(got[0][1]["id"], got[-1][1]["id"]); self.assertEqual(got[-1][1]["status"], "done")
+
+    def test_dismissal_and_timeout_clear_the_desktop_alert(self):
+        got = self.events()
+        threading.Timer(1.3, lambda: core.control.dismiss_request(HOME)).start()
+        self.assertEqual(self.call(reason="approve", wait_seconds=20)["status"], "dismissed")
+        self.assertEqual(got[-1][1]["status"], "dismissed")
+        got.clear()
+        self.assertEqual(self.call(reason="approve", wait_seconds=1)["status"], "timeout")
+        self.assertEqual(got[-1], ("ended", {**got[-1][1], "status": "expired"}))
+
+    def test_still_waiting_keeps_the_desktop_alert_up(self):
+        got = self.events()
+        saved = core.tool.call_budget
+        core.tool.call_budget = lambda: 2.0
+        try:
+            self.assertEqual(self.call(reason="sign in", wait_seconds=600)["status"], "still_waiting")
+        finally:
+            core.tool.call_budget = saved
+        self.assertEqual([e for e, _ in got], ["request"])               # no "ended": the request is still open
+
+    def test_the_real_event_bridge_names_the_events_for_the_desktop_half(self):
+        sent = []
+        import types
+        core.surfaces.broadcast = self._bc                               # the real one, against a fake gateway module
+        fake = types.ModuleType("tui_gateway.server"); fake._broadcast_global_event = lambda n, p=None: sent.append((n, p))
+        pkg = types.ModuleType("tui_gateway"); pkg.server = fake
+        saved = {k: sys.modules.get(k) for k in ("tui_gateway", "tui_gateway.server")}
+        sys.modules.update({"tui_gateway": pkg, "tui_gateway.server": fake})
+        try:
+            self.assertTrue(core.surfaces.announce(HOME, {"id": "r9", "reason": "Solve the CAPTCHA", "created": 1}))
+            self.assertTrue(core.surfaces.ended(HOME, "r9", "done"))
+        finally:
+            for k, v in saved.items():
+                sys.modules.pop(k, None) if v is None else sys.modules.__setitem__(k, v)
+        self.assertEqual([n for n, _ in sent], ["plugin.takeover.request", "plugin.takeover.ended"])
+        self.assertEqual(sent[0][1]["reason"], "Solve the CAPTCHA")
+
+    def test_no_gateway_in_this_process_means_no_event_and_no_heavy_import(self):
+        core.surfaces.broadcast = self._bc
+        before = "tui_gateway.server" in sys.modules
+        self.assertFalse(core.surfaces.announce(HOME, {"id": "x", "reason": "y"}) and not before)
+        self.assertEqual("tui_gateway.server" in sys.modules, before, "must not import the gateway just to find nobody")
+
+    def test_webui_and_local_surfaces_are_not_messaging(self):
+        saved = os.environ.get("HERMES_SESSION_PLATFORM")
+        try:
+            for plat, expect in (("webui", False), ("desktop", False), ("cli", False), ("tui", False), ("dashboard", False),
+                                 ("", False), ("telegram", True), ("Discord", True), ("slack", True), ("whatsapp", True)):
+                os.environ["HERMES_SESSION_PLATFORM"] = plat
+                self.assertEqual(core.surfaces.is_messaging(), expect, plat)
+        finally:
+            if saved is None:
+                os.environ.pop("HERMES_SESSION_PLATFORM", None)
+            else:
+                os.environ["HERMES_SESSION_PLATFORM"] = saved
+
+    def test_on_a_messaging_platform_the_agent_is_told_to_message_the_user_first(self):
+        saved = core.surfaces.is_messaging, core.surfaces.session_key
+        core.surfaces.is_messaging, core.surfaces.session_key = (lambda: True), (lambda: "telegram:42")
+        try:
+            t0 = time.time()
+            first = self.call(reason="Enter the code on your bank login", wait_seconds=30)
+            self.assertEqual(first["status"], "requested_tell_user", first)
+            self.assertLess(time.time() - t0, 5, "must return at once, not block on a request the user cannot see")
+            self.assertIn("Enter the code on your bank login", first["message"]); self.assertIn("Hermes Desktop", first["message"])
+            self.assertEqual(core.state.request_view(HOME)["status"], "pending")        # the request stays posted
+            self.human(0.8, 0.8)                                                        # second call: now it waits
+            second = self.call(reason="Enter the code on your bank login", wait_seconds=30)
+            self.assertEqual(second["status"], "completed", second)
+        finally:
+            core.surfaces.is_messaging, core.surfaces.session_key = saved
+
+    def test_a_different_messaging_chat_is_also_told_once(self):
+        saved = core.surfaces.is_messaging, core.surfaces.session_key
+        core.surfaces.is_messaging = lambda: True
+        try:
+            core.surfaces.session_key = lambda: "discord:1"
+            self.assertEqual(self.call(reason="approve", wait_seconds=1)["status"], "requested_tell_user")
+            core.surfaces.session_key = lambda: "telegram:2"
+            self.assertEqual(self.call(reason="approve", wait_seconds=1)["status"], "requested_tell_user")
+            self.assertEqual(self.call(reason="approve", wait_seconds=1)["status"], "timeout")
+        finally:
+            core.surfaces.is_messaging, core.surfaces.session_key = saved
 
     def test_interrupt_cancels(self):
         from tools import interrupt
