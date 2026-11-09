@@ -94,3 +94,7 @@ main.main.showing-x-takeover > #mainTakeover { display: flex; }
 .hdo-plugin-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .hdo-plugin-row .plugin-open-btn { cursor: pointer; }
 .hdo-plugin-note { font-size: 12px; opacity: .75; }
+
+.hdo-approve-here { outline: 3px solid #1f6feb; outline-offset: 4px; border-radius: 8px; animation: hdo-approve 1.4s ease-in-out 3; }
+.hdo-approve-btn { box-shadow: 0 0 0 3px rgba(31,111,235,.55); font-weight: 700; }
+@keyframes hdo-approve { 50% { outline-color: rgba(31,111,235,.25); } }

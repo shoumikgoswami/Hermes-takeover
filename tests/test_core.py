@@ -571,6 +571,49 @@ class TestNudge(Base):
         self.assertIsNone(plugin_init._transform_tool_result())
 
 
+class TestBootstrap(Base):
+    def setUp(self):
+        super().setUp()
+        core.bootstrap._kicked = False
+
+    def test_a_source_checkout_never_bootstraps(self):
+        self.assertFalse(core.bootstrap.installed_copy(HOME))         # tests load the repo, not <home>/plugins/takeover
+        spawned = []
+        saved = core.bootstrap.spawn
+        core.bootstrap.spawn = lambda home: spawned.append(home)
+        try:
+            core.bootstrap.kick(HOME); time.sleep(0.5)
+        finally:
+            core.bootstrap.spawn = saved
+        self.assertEqual(spawned, [])
+
+    def test_kick_runs_at_most_once_per_process_and_honours_the_off_switch(self):
+        os.environ["TAKEOVER_NO_BOOTSTRAP"] = "1"
+        try:
+            self.assertFalse(core.bootstrap.kick(HOME))
+        finally:
+            del os.environ["TAKEOVER_NO_BOOTSTRAP"]
+        saved = core.bootstrap.installed_copy
+        core.bootstrap.installed_copy = lambda home: True
+        calls = []
+        saved_needs, saved_spawn = core.bootstrap.needs, core.bootstrap.spawn
+        core.bootstrap.needs = lambda home: {"setup": False, "webui": True}
+        core.bootstrap.spawn = lambda home: calls.append(home)
+        try:
+            self.assertTrue(core.bootstrap.kick(HOME))
+            self.assertFalse(core.bootstrap.kick(HOME))
+            time.sleep(0.5)
+        finally:
+            core.bootstrap.installed_copy, core.bootstrap.needs, core.bootstrap.spawn = saved, saved_needs, saved_spawn
+        self.assertEqual(calls, [HOME])
+
+    def test_only_upgrades_never_downgrades(self):
+        older, vt = core.webui.older, core.webui.vt
+        self.assertTrue(older("0.3.9")); self.assertTrue(older(None)); self.assertTrue(older("garbage"))
+        self.assertFalse(older(core.__version__)); self.assertFalse(older("99.0.0"))
+        self.assertGreater(vt("0.10.0"), vt("0.9.1"))
+
+
 class TestSetup(unittest.TestCase):
     """First-run setup policy, with the package installer mocked (it needs root)."""
 

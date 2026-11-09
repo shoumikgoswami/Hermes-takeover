@@ -173,6 +173,49 @@ class TestAuth(Base):
         self.assertEqual((st, h.get("x-takeover-closed")), (404, str(sc.CLOSE_IDLE)))
 
 
+class TestProfiles(Base):
+    """One service for every profile: ?profile= picks the Hermes home, only where Takeover is installed."""
+    def setUp(self):
+        super().setUp()
+        self.p2 = Path(HOME) / "profiles" / "p2"
+        (self.p2 / "plugins" / "takeover").mkdir(parents=True, exist_ok=True)
+        (self.p2 / "plugins" / "takeover" / "plugin.yaml").write_text("name: takeover\n")
+        type(self).app._homes_cache = (0.0, [])
+        for h in (HOME, str(self.p2)):
+            try: os.unlink(core.state.data_dir(h) / "request.json")
+            except OSError: pass
+
+    def test_default_and_installed_profiles_are_served(self):
+        st, j = self.req("POST", "/api/status?profile=default", {})[:2]
+        self.assertEqual((st, j["ok"], j["profile"]), (200, True, "default"))
+        self.assertEqual(Path(j["hermes_home"]).resolve(), Path(HOME).resolve())
+        st, j = self.req("POST", "/api/status?profile=p2", {})[:2]
+        self.assertTrue(j["ok"], j); self.assertEqual(Path(j["hermes_home"]).resolve(), self.p2.resolve())
+
+    def test_not_installed_and_bad_names_are_refused(self):
+        self.assertEqual(self.req("POST", "/api/status?profile=ghost", {})[1]["error"], "not_installed")
+        for bad in ("..%2Fetc", "UPPER", "a%20b", "x" * 70):
+            self.assertEqual(self.req("POST", f"/api/status?profile={bad}", {})[1]["error"], "bad_profile", bad)
+
+    def test_a_viewer_belongs_to_its_profile(self):
+        vid = self.req("POST", "/api/viewer?profile=default", {})[1]["viewer_id"]
+        self.assertEqual(self.req("POST", "/api/take-over?profile=p2", {"viewer_id": vid})[1]["error"], "unknown_viewer")
+        v2 = self.req("POST", "/api/viewer?profile=p2", {})[1]["viewer_id"]
+        self.assertNotEqual(v2, vid)
+
+    def test_pulse_reports_requests_waiting_in_other_profiles(self):
+        core.state.create_request(str(self.p2), "Approve the GitHub app")
+        j = self.req("POST", "/api/pulse?profile=default", {})[1]
+        self.assertIsNone(j["request"])
+        self.assertEqual([(e["profile"], e["reason"]) for e in j["elsewhere"]], [("p2", "Approve the GitHub app")])
+        j2 = self.req("POST", "/api/pulse?profile=p2", {})[1]
+        self.assertEqual(j2["request"]["reason"], "Approve the GitHub app")
+        self.assertEqual(j2["elsewhere"], [])
+
+    def test_health_says_it_serves_every_profile(self):
+        self.assertTrue(self.req("GET", "/health", token=None)[1]["multi_profile"])
+
+
 class TestStream(Base):
     def test_screen_bytes_arrive_through_long_poll(self):
         _, sid = self.open()

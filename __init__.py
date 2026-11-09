@@ -49,18 +49,11 @@ def _slash(raw: str) -> str:
 
 
 def _on_session_start(**kwargs) -> None:
-    """First agent session after install: wire the plugin into hermes-webui if it is on this host (idempotent, quiet)."""
-    import threading
-
-    def work() -> None:
-        try:
-            core = _load_core()
-            if core.webui.state_dir() is None or not core.webui.enabled():
-                return
-            core.webui.integrate(core.compat.current_home())
-        except Exception:  # noqa: BLE001 - never let a helper break a chat session
-            pass
-    threading.Thread(target=work, name="takeover-webui", daemon=True).start()
+    """Belt and braces for the first-run bootstrap (it normally already ran when the plugin was loaded)."""
+    try:
+        _load_core().bootstrap.kick()
+    except Exception:  # noqa: BLE001 - never let a helper break a chat session
+        pass
 
 
 def _pre_tool_call(**kwargs):
@@ -81,6 +74,7 @@ def _transform_tool_result(**kwargs):
 
 def register(ctx) -> None:
     core = _load_core()
+    core.bootstrap.kick()         # first run right after install: WebUI Screen page + service, screen packages (once)
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("pre_tool_call", _pre_tool_call)
     ctx.register_tool(name=core.tool.NAME, toolset="takeover", schema=core.tool.SCHEMA, handler=core.tool.handle,

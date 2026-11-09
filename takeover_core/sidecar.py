@@ -13,6 +13,10 @@ Because every byte goes through the proxy, no extra port, ticket, tunnel or CSP 
 exactly as authenticated as the rest of WebUI. The same lease gate as the dashboard bridge applies: key / pointer /
 clipboard / resize messages are dropped unless the lease says THIS viewer is the human holder.
 
+Profiles: every call may carry ``?profile=<name>`` (the WebUI page sends its active profile). The sidecar maps it to that
+profile's Hermes home (``default`` = the root, else ``<root>/profiles/<name>``) and serves it only if Takeover is
+installed there, so one service covers every profile and switching profiles in WebUI switches the Screen page.
+
 Auth (token-v1): every route except /health requires ``X-Hermes-Sidecar-Token`` equal to the token WebUI minted in
 ``<state>/sidecar-auth/takeover.token`` (re-read per request): 401 on mismatch, 503 if the file is missing.
 """
@@ -20,6 +24,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import re
 import logging
 import os
 import socket
@@ -71,6 +76,22 @@ def check_token(presented: Optional[str]) -> int:
     if not presented or not hmac.compare_digest(presented.encode(), expected.encode()):
         return 401
     return 200
+
+
+PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def plugin_installed(home) -> bool:
+    return (Path(str(home)) / "plugins" / PLUGIN_ID / "plugin.yaml").is_file()
+
+
+def hermes_root(home) -> Path:
+    """The root that holds ``profiles/`` (Hermes's own rule when available)."""
+    try:
+        return Path(compat.load().hc.get_default_hermes_root(home=str(home)))
+    except Exception:  # noqa: BLE001 - older Hermes
+        h = Path(str(home))
+        return h.parent.parent if h.parent.name == "profiles" else h
 
 
 def home_id(home) -> str:
@@ -267,12 +288,58 @@ class App:
     def __init__(self) -> None:
         self.home = compat.current_home()
         self.home_id = home_id(self.home)
+        self.root = hermes_root(self.home)
         self.sessions = Sessions()
+        self._homes_cache: Tuple[float, list] = (0.0, [])
         compat.load()
 
-    def viewer(self, body: dict) -> Optional[str]:
+    def resolve(self, query: Dict[str, list]) -> Tuple[Optional[str], Optional[str], str]:
+        """``(home, error, profile)`` for the request's ``?profile=``; no profile = the home this service started in."""
+        name = ((query.get("profile") or [""])[0] or "").strip().lower()
+        if not name:
+            return str(self.home), None, ""
+        if name == "default":
+            home = self.root
+        elif PROFILE_RE.fullmatch(name):
+            home = self.root / "profiles" / name
+        else:
+            return None, "bad_profile", name
+        if str(home) != str(self.home) and not plugin_installed(home):
+            return None, "not_installed", name
+        return str(home), None, name
+
+    def installed_homes(self) -> list:
+        """``[(profile, home)]`` for every profile with Takeover installed (cached 10 s)."""
+        at, homes = self._homes_cache
+        if time.monotonic() - at < 10:
+            return homes
+        found = [("default", self.root)] if plugin_installed(self.root) or str(self.root) == str(self.home) else []
+        try:
+            for d in sorted((self.root / "profiles").iterdir()):
+                if d.is_dir() and PROFILE_RE.fullmatch(d.name) and (plugin_installed(d) or str(d) == str(self.home)):
+                    found.append((d.name, d))
+        except OSError:
+            pass
+        self._homes_cache = (time.monotonic(), found)
+        return found
+
+    def elsewhere(self, home: str) -> list:
+        """Pending requests in the OTHER profiles, so a request is never missed because WebUI shows another profile."""
+        out = []
+        for name, h in self.installed_homes():
+            if str(h) == str(home):
+                continue
+            try:
+                r = state.request_view(str(h))
+            except Exception:  # noqa: BLE001
+                r = None
+            if r and r.get("status") == "pending":
+                out.append({"profile": name, "reason": r.get("reason"), "created": r.get("created")})
+        return out
+
+    def viewer(self, body: dict, home: Optional[str] = None) -> Optional[str]:
         v = (body or {}).get("viewer_id")
-        return v if tickets.valid_viewer_id(self.home, v) else None
+        return v if tickets.valid_viewer_id(home or self.home, v) else None
 
     def route(self, method: str, path: str, query: Dict[str, list], body: bytes) -> Tuple[int, Dict[str, str], bytes]:
         def jr(obj: Any, status: int = 200):
@@ -285,11 +352,17 @@ class App:
             except ValueError:
                 return {}
 
-        home = self.home
+        if path not in ("/api/rfb/send", "/api/rfb/recv", "/api/rfb/close"):      # stream calls are bound by their sid
+            home, err, name = self.resolve(query)
+            if err:
+                return jr({"ok": False, "error": err, "profile": name})
+        else:
+            home = self.home
+        viewer = lambda b: self.viewer(b, home)  # noqa: E731
         if path == "/api/status" and method in ("GET", "POST"):
-            return jr(control.status(home, self.viewer(payload())))
+            return jr(dict(control.status(home, viewer(payload())), profile=name or "default"))
         if path == "/api/pulse" and method in ("GET", "POST"):
-            return jr(control.pulse(home, self.viewer(payload())))
+            return jr(dict(control.pulse(home, viewer(payload())), profile=name or "default", elsewhere=self.elsewhere(home)))
         if method != "POST" and not (path == "/api/rfb/recv" and method == "GET"):
             return jr({"ok": False, "error": "not_found"}, 404)
         if path == "/api/setup":
@@ -303,17 +376,17 @@ class App:
             control.start_screen_async(home)
             return jr({"ok": True})
         if path == "/api/viewer":
-            return jr({"ok": True, "viewer_id": self.viewer(payload()) or tickets.new_viewer_id(home)})
+            return jr({"ok": True, "viewer_id": viewer(payload()) or tickets.new_viewer_id(home)})
         if path == "/api/take-over":
             b = payload()
-            vid = self.viewer(b)
+            vid = viewer(b)
             if not vid:
                 return jr({"ok": False, "error": "unknown_viewer"})
             if not control.screen(home)["running"]:
                 return jr({"ok": False, "error": "screen_off"})
             return jr({"ok": True, "lease": control.take_over(home, vid, str(b.get("reason") or ""))})
         if path == "/api/hand-back":
-            vid = self.viewer(payload())
+            vid = viewer(payload())
             if not vid:
                 return jr({"ok": False, "error": "unknown_viewer"})
             return jr({"ok": True, "lease": control.hand_back(home, vid)})
@@ -325,7 +398,7 @@ class App:
 
         # the stream ----------------------------------------------------------
         if path == "/api/rfb/open":
-            vid = self.viewer(payload())
+            vid = viewer(payload())
             if not vid:
                 return jr({"ok": False, "error": "unknown_viewer"})
             try:
@@ -392,7 +465,8 @@ def make_handler(app: App):
             try:
                 if u.path == "/health":
                     st, hdr, out = 200, {"Content-Type": "application/json"}, json.dumps(
-                        {"ok": True, "service": PLUGIN_ID, "version": __version__, "pid": os.getpid(), "home_id": app.home_id}).encode()
+                        {"ok": True, "service": PLUGIN_ID, "version": __version__, "pid": os.getpid(), "home_id": app.home_id,
+                         "multi_profile": True}).encode()
                 else:
                     code = check_token(self.headers.get(HEADER))
                     if code != 200:

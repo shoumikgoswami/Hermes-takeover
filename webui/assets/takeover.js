@@ -1,6 +1,12 @@
 /* Takeover for hermes-webui: the Screen page. See the agent's browser live, take over, hand back.
    Backend = the plugin's loopback sidecar behind WebUI's authenticated proxy. The live view is noVNC running over a
    long-poll HTTP channel (HttpChannel below) because that proxy cannot carry WebSockets. noVNC 1.6.0 is bundled. */
+// WebUI's active profile lives in its global `S` (a top-level const of WebUI's classic scripts). Read it out here, outside
+// the IIFE, because inside it `S` is Takeover's own state.
+function __hermesTakeoverWebuiProfile() {
+  try { return (typeof S !== 'undefined' && S && typeof S.activeProfile === 'string' && S.activeProfile.trim()) || 'default'; }
+  catch (_) { return 'default'; }
+}
 (() => {
   'use strict';
   if (window.__hermesTakeover) return;
@@ -9,7 +15,7 @@
   const BASE = '/api/extensions/takeover/sidecar';
   const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
   const ASSETS = SCRIPT_SRC ? new URL('.', SCRIPT_SRC).pathname : '/extensions/takeover/assets/';
-  const VIEWER_KEY = 'hermesExt:takeover:viewer';       // sessionStorage: one viewer id per browser tab
+  const VIEWER_KEY = 'hermesExt:takeover:viewer';       // sessionStorage: one viewer id per browser tab and profile
 
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
@@ -44,9 +50,16 @@
     mine: false, inputOn: false, note: '', zoom: false,
     timer: null, inflight: false, starting: false, gen: 0, retry: 0, retried: false, reconnectTimer: null,
     autoSetupAsked: false, RFB: null,
+    target: null,          // a profile other than WebUI's active one, while answering THAT profile's request
+    profile: null,         // the profile the current status / stream belong to
+    approving: false,
   };
-  try { S.viewer = sessionStorage.getItem(VIEWER_KEY) || null; } catch (_) { /* private mode */ }
-  function setViewer(v) { S.viewer = v; try { sessionStorage.setItem(VIEWER_KEY, v); } catch (_) { /* ignore */ } }
+  // The profile the page acts on: WebUI's active profile, unless the user is answering another profile's request.
+  const prof = () => S.target || __hermesTakeoverWebuiProfile();
+  const viewerKey = () => VIEWER_KEY + ':' + prof();
+  function loadViewer() { try { S.viewer = sessionStorage.getItem(viewerKey()) || null; } catch (_) { S.viewer = null; } }
+  loadViewer();
+  function setViewer(v) { S.viewer = v; try { sessionStorage.setItem(viewerKey(), v); } catch (_) { /* ignore */ } }
   let page = null; let side = null; const F = {};
 
   // ── API ───────────────────────────────────────────────────────────────────
@@ -54,7 +67,7 @@
     const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     const to = setTimeout(() => { try { ctrl && ctrl.abort(); } catch (_) { /* ignore */ } }, (opts && opts.timeout) || 9000);
     try {
-      const r = await fetch(BASE + path, {
+      const r = await fetch(BASE + path + (path.indexOf('?') < 0 ? '?' : '&') + 'profile=' + encodeURIComponent(prof()), {
         method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
         headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body), signal: ctrl ? ctrl.signal : undefined,
@@ -143,6 +156,7 @@
       '<div class="hdo-head"><div class="hdo-state"><span class="hdo-dot" data-f="dot"></span><span data-f="state" role="status" aria-live="polite">Connecting…</span></div>' +
       '<div class="hdo-actions"><button type="button" class="hdo-btn" data-f="start" hidden>Start screen</button>' +
       '<button type="button" class="hdo-btn" data-f="setup" hidden>Run setup</button>' +
+      '<button type="button" class="hdo-btn hdo-primary" data-f="approve" hidden>Allow Takeover</button>' +
       '<button type="button" class="hdo-btn hdo-primary" data-f="take" hidden>Take over</button>' +
       '<button type="button" class="hdo-btn hdo-primary" data-f="back" hidden>Hand back</button></div></div>' +
       '<div class="hdo-ask" data-f="ask" hidden></div>' +
@@ -204,7 +218,7 @@
       side.innerHTML = SIDE_HTML;
       sideHost.parentNode.appendChild(side);
       const st = side.querySelector('[data-s=take]');
-      if (st) st.addEventListener('click', () => takeOverFromAnywhere());
+      if (st) st.addEventListener('click', () => answerElsewhere(side.dataset.target || null));
       const so = side.querySelector('[data-s=open]');
       if (so) so.addEventListener('click', () => onNavClick(true));
     }
@@ -251,18 +265,22 @@
     '<li>You type passwords straight into the browser, never into chat.</li>' +
     '<li>Left without handing back? Use Force hand-back on the Screen page, or <code>/takeover release</code>.</li></ul>' +
     '<div class="hdo-side-foot">Feedback or ideas? <a href="mailto:' + FEEDBACK + '?subject=Takeover%20plugin%20feedback">' + FEEDBACK + '</a>' +
-    '<div class="hdo-side-ver">Takeover 0.3.0</div></div>' +
+    '<div class="hdo-side-ver">Takeover 0.4.0</div></div>' +
     '</div>';
 
   function renderSide(p) {
     if (!side || !p) return;
     const q = (k) => side.querySelector('[data-s=' + k + ']');
-    const req = p.request; const lease = p.lease || {};
-    const pending = !!(req && req.status === 'pending');
+    const own = p.request && p.request.status === 'pending' ? p.request : null;
+    const other = !own && Array.isArray(p.elsewhere) && p.elsewhere.length ? p.elsewhere[0] : null;
+    const req = own || (other ? { status: 'pending', reason: other.reason, profile: other.profile } : null);
+    const lease = p.lease || {};
+    const pending = !!req;
+    side.dataset.target = (req && req.profile) || '';
     let text;
     if (lease.mine) text = 'You have control. Hand back on the Screen page when you are done.';
     else if (lease.holder === 'human') text = 'Someone else has control of the screen.';
-    else if (pending) text = 'The agent needs you:';
+    else if (pending) text = req.profile ? 'The agent in profile "' + req.profile + '" needs you:' : 'The agent needs you:';
     else text = 'Nothing to do. The agent is driving.';
     q('status').textContent = text;
     q('reason').textContent = pending ? req.reason : ''; q('reason').hidden = !pending;
@@ -354,10 +372,26 @@
   function schedule(ms) {
     clearTimeout(S.timer);
     const setupRunning = S.status && S.status.setup && S.status.setup.state === 'running';
-    S.timer = setTimeout(tick, ms == null ? (S.connecting || S.starting || setupRunning ? 1000 : 2500) : ms);
+    S.timer = setTimeout(tick, ms == null ? (S.connecting || S.starting || setupRunning || needsApproval() ? 1000 : 2500) : ms);
+  }
+  const needsApproval = () => !!(S.err && (S.err.http === 401 || S.err.http === 403 || S.err.http === 503));
+  function followProfile() {
+    // WebUI's profile switcher changed the profile (or the user finished answering another profile's request): the
+    // lease, the screen and the viewer id all belong to a profile, so start over for the new one.
+    const p = prof();
+    if (S.profile === null) { S.profile = p; return; }
+    if (p === S.profile) return;
+    S.profile = p; disconnect(); S.status = null; S.err = null; S.mine = false; S.inputOn = false; S.note = '';
+    S.autoSetupAsked = false; loadViewer();
   }
   async function refresh() {
+    followProfile();
     const r = await api('/api/status', { viewer_id: S.viewer });
+    if (r.error === 'not_installed') {
+      S.status = null;
+      S.err = { http: 200, error: 'not_installed', message: '' };
+      return r;
+    }
     if (r.ok && r.readiness) {
       S.status = r; S.err = null;
       const st = r.setup || {};
@@ -403,8 +437,8 @@
     const e = S.err;
     if (e) {
       if (e.error === 'incompatible') return { dot: 'err', text: 'Hermes changed under Takeover', hint: e.message };
-      if (e.http === 401 || e.http === 403) return { dot: 'err', text: 'Waiting for your approval', hint: 'Approve Takeover in Settings → Extensions → Diagnostics → Loopback sidecars → Takeover → Approve proxy. WebUI authentication must be on (Settings → set a password).' };
-      if (e.http === 503) return { dot: 'err', text: 'Waiting for your approval', hint: 'Approve Takeover in Settings → Extensions → Diagnostics → Loopback sidecars, then reload.' };
+      if (e.error === 'not_installed') return { dot: 'off', text: 'Takeover is not installed in the "' + prof() + '" profile', hint: 'Install it there with: hermes -p ' + prof() + ' plugins install shoumikgoswami/Hermes-takeover --enable' };
+      if (e.http === 401 || e.http === 403 || e.http === 503) return { dot: 'wait', text: 'One step: allow Takeover in WebUI', approve: true, hint: 'WebUI asks you once before an extension may use its service. Tap "Allow Takeover", then tap "Approve proxy consent" on the highlighted row; this page continues by itself. (WebUI needs a password set for this: Settings → Password.)' };
       return { dot: 'err', text: 'Takeover service is not running', hint: 'It starts with your next agent chat. To start it now run: hermes takeover setup', };
     }
     const st = S.status;
@@ -434,6 +468,7 @@
     F.dot.dataset.s = info.dot; setText(F.state, info.text);
     setHidden(F.start, !(st && !S.err && ready && !scr.running && !scr.starting && !S.starting));
     setHidden(F.setup, !(info.retry && !ready));
+    setHidden(F.approve, !info.approve);
     setHidden(F.take, !(running && !S.mine && S.connected));
     setHidden(F.back, !(running && S.mine));
     setHidden(F.tools, !(running && S.mine && S.connected && S.inputOn));
@@ -585,6 +620,7 @@
       if (!r.ok) { toast('Hand back failed: ' + (r.error || r.http), 'error'); return; }
       if (S.rfb) S.rfb.viewOnly = true;
       S.mine = false; S.inputOn = false;
+      if (S.target) setTimeout(() => { S.target = null; schedule(0); }, 1500);   // back to WebUI's own profile
       S.note = 'Handed back. If the agent asked for this it continues by itself; otherwise tell it you are done.';
       await refresh(); reconcile();
     } finally { F.back.disabled = false; render(); }
@@ -638,6 +674,7 @@
     if (page.dataset.bound) return;
     page.dataset.bound = '1';
     F.start.addEventListener('click', startScreen);
+    F.approve.addEventListener('click', goToApproval);
     F.setup.addEventListener('click', async () => { await api('/api/setup', {}); S.autoSetupAsked = true; schedule(0); });
     F.take.addEventListener('click', takeOver);
     F.back.addEventListener('click', handBack);
@@ -684,8 +721,11 @@
       if (r.ok && r.lease) {
         G.delay = 5000;
         renderSide(r);
-        const req = r.request; const mine = !!r.lease.mine;
-        const show = !S.active && ((req && req.status === 'pending') || mine);
+        const own = r.request && r.request.status === 'pending' ? r.request : null;
+        const other = !own && Array.isArray(r.elsewhere) && r.elsewhere.length ? r.elsewhere[0] : null;
+        const req = own || (other ? { status: 'pending', reason: other.reason, profile: other.profile } : null);
+        const mine = !!r.lease.mine;
+        const show = !S.active && (!!req || mine);
         if (show) {
           if (!G.el) {
             G.el = document.createElement('div'); G.el.className = 'hdo-global'; G.el.setAttribute('role', 'status');
@@ -694,15 +734,16 @@
           G.el.className = 'hdo-global' + (mine ? ' hdo-global-me' : '');
           G.el.textContent = '';
           const msg = document.createElement('span');
-          msg.textContent = mine ? 'You still have control of the agent\'s screen. ' : 'The agent needs you: ' + req.reason + ' ';
+          msg.textContent = mine ? 'You still have control of the agent\'s screen. '
+            : (req.profile ? 'The agent in profile "' + req.profile + '" needs you: ' : 'The agent needs you: ') + req.reason + ' ';
           const a = document.createElement('button'); a.type = 'button';
           a.className = mine ? 'hdo-link' : 'hdo-global-take'; a.dataset.f = 'globalTake';
           a.textContent = mine ? 'Open Screen to hand back' : 'Take over';
-          a.addEventListener('click', () => (mine ? onNavClick(true) : takeOverFromAnywhere()));
+          a.addEventListener('click', () => (mine ? onNavClick(true) : answerElsewhere(req.profile)));
           G.el.appendChild(msg); G.el.appendChild(a);
           if (!mine) {
             const w = document.createElement('button'); w.type = 'button'; w.className = 'hdo-link'; w.textContent = 'Just watch';
-            w.addEventListener('click', () => onNavClick(true));
+            w.addEventListener('click', () => { S.target = req.profile && req.profile !== __hermesTakeoverWebuiProfile() ? req.profile : null; onNavClick(true); });
             G.el.appendChild(document.createTextNode(' ')); G.el.appendChild(w);
           }
           G.el.hidden = false;
@@ -729,6 +770,40 @@
     if (G.el) G.el.hidden = true;
     await onNavClick(true);
     if (S.connected && !S.mine) { S.autoTake = 0; takeOver(); }
+  }
+
+  // ── the one-time WebUI approval, in one tap ───────────────────────────────
+  // WebUI's consent belongs to WebUI: we never grant it ourselves. We take the user to the exact button (Settings ->
+  // Extensions -> Takeover's sidecar row), highlight it, and come back to the Screen page as soon as it is approved.
+  async function goToApproval() {
+    if (typeof window.switchPanel !== 'function') return;
+    S.approving = true;
+    await window.switchPanel('settings');
+    if (typeof switchSettingsSection === 'function') switchSettingsSection('extensions');
+    let btn = null;
+    for (let i = 0; i < 50 && !btn; i++) {
+      btn = document.querySelector('[data-extension-sidecar-proxy-id="takeover"]');
+      if (!btn) await sleep(200);
+    }
+    if (!btn) { toast('Open Settings → Extensions → Diagnostics → Loopback sidecars → Takeover → Approve proxy consent.'); return; }
+    for (let el = btn.parentElement; el; el = el.parentElement) {
+      if (el.tagName === 'DETAILS') el.open = true;
+      if (el.hidden) el.hidden = false;
+    }
+    const row = btn.closest('.extension-sidecar-row') || btn;
+    row.classList.add('hdo-approve-here'); btn.classList.add('hdo-approve-btn');
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    toast('Tap "Approve proxy consent" for Takeover');
+    btn.addEventListener('click', () => {
+      if (btn.dataset.extensionSidecarProxyApproved !== 'true') return;      // a Revoke click: stay here
+      setTimeout(() => { S.err = null; onNavClick(true); schedule(0); }, 900);
+    }, { once: true });
+  }
+
+  /** Answer a request that came from another profile than the one WebUI is showing. */
+  function answerElsewhere(profile) {
+    S.target = profile && profile !== __hermesTakeoverWebuiProfile() ? profile : null;
+    takeOverFromAnywhere();
   }
 
   // ── Settings -> Plugins integration ───────────────────────────────────────
@@ -776,8 +851,9 @@
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
       mount(); wrapCore(); watchPluginsPanel();
       window.__hermesTakeover = {
-        version: '0.3.0', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
+        version: '0.4.0', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
+        profile: () => prof(),
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,
           err: S.err, closeCode: S.chan ? S.chan.closeCode : null,
           lease: S.status && S.status.lease ? { holder: S.status.lease.holder, mine: S.status.lease.mine } : null }),

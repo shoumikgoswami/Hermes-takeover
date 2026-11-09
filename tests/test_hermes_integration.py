@@ -19,6 +19,7 @@ AGENT = os.path.expanduser(os.environ.get("TAKEOVER_AGENT_DIR", "~/.hermes/herme
 HOME = tempfile.mkdtemp(prefix="takeover-hermes-")
 os.environ["HERMES_HOME"] = HOME
 os.environ["HERMES_WEBUI_STATE_DIR"] = os.path.join(HOME, "no-webui")       # never touch a real hermes-webui
+os.environ["TAKEOVER_NO_BOOTSTRAP"] = "1"          # this file's in-process loads must not start helpers; one test re-enables it
 sys.path.insert(0, AGENT)
 
 
@@ -79,6 +80,47 @@ class TestThroughHermes(unittest.TestCase):
         e = registry.get_entry("request_takeover", scope=str(get_hermes_home())) or registry.get_entry("request_takeover")
         self.assertIsNotNone(e, "request_takeover not in Hermes's tool registry")
         self.assertEqual(e.toolset, "takeover")
+
+
+class TestFirstRunRightAfterInstall(unittest.TestCase):
+    """The installed copy, loaded the way Hermes loads it, wires hermes-webui and the screen with no new chat."""
+    PORT = "17977"
+
+    def test_bootstrap_installs_the_webui_page_and_service_and_doctor_does_not(self):
+        import shutil, time, urllib.request
+        sd = Path(HOME) / "webui-state"
+        sd.mkdir(exist_ok=True)
+        env = dict(os.environ, HERMES_WEBUI_STATE_DIR=str(sd), TAKEOVER_PORT=self.PORT)
+        env.pop("TAKEOVER_NO_BOOTSTRAP", None)
+        # 1. doctor imports the plugin from its source tree with a temporary home: must not bootstrap anything
+        subprocess.run(["hermes", "plugins", "doctor", str(ROOT), "--ci"], capture_output=True, text=True, timeout=180, env=env)
+        time.sleep(2)
+        self.assertFalse((sd / "extensions" / "takeover").exists(), "doctor must not install into WebUI")
+        # 2. the installed copy, as Hermes loads it (discover_plugins -> register): bootstraps once
+        code = ("import sys,time; sys.path.insert(0, %r)\n"
+                "from hermes_cli import plugins as P; P.discover_plugins(); time.sleep(3)\n") % AGENT
+        subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=180, env=env)
+        health = None
+        for _ in range(90):
+            try:
+                health = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{self.PORT}/health", timeout=1).read())
+                if (sd / "extensions" / "takeover" / "manifest.json").exists():
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+        try:
+            self.assertTrue((sd / "extensions" / "takeover" / "assets" / "takeover.js").exists(), "Screen page installed")
+            self.assertTrue(health and health["service"] == "takeover" and health["multi_profile"], health)
+            man = json.loads((sd / "extension-install-manifest.json").read_text())
+            self.assertIn("takeover", man["installed"])
+            log = (Path(HOME) / "plugin-data" / "takeover" / "bootstrap.log").read_text()
+            self.assertIn("'webui'", log)
+        finally:
+            if health and health.get("pid"):
+                try: os.kill(int(health["pid"]), 15)
+                except OSError: pass
+            shutil.rmtree(sd, ignore_errors=True)
 
 
 if __name__ == "__main__":

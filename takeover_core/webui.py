@@ -39,7 +39,8 @@ INSTALL_MANIFEST = "extension-install-manifest.json"
 def state_dir() -> Optional[Path]:
     env = os.environ.get("HERMES_WEBUI_STATE_DIR")
     if env:
-        return Path(env).expanduser()
+        p = Path(env).expanduser()
+        return p if p.is_dir() else None
     cand = Path.home() / ".hermes" / "webui"
     return cand if cand.is_dir() else None
 
@@ -49,6 +50,20 @@ def port() -> int:
         return int(os.environ.get("TAKEOVER_PORT") or DEFAULT_PORT)
     except ValueError:
         return DEFAULT_PORT
+
+
+def vt(v: Optional[str]) -> tuple:
+    """Version tuple for comparisons ('0.10.0' > '0.9.1'); unknown = oldest."""
+    try:
+        return tuple(int(x) for x in str(v).split(".")[:3])
+    except (TypeError, ValueError):
+        return (0,)
+
+
+def older(v: Optional[str]) -> bool:
+    """True when ``v`` (an installed / running copy) is older than this plugin. Several profiles may carry different
+    versions of Takeover: only ever upgrade, never let an older copy replace a newer one."""
+    return vt(v) < vt(__version__)
 
 
 def installed_version(sd: Optional[Path] = None) -> Optional[str]:
@@ -71,9 +86,9 @@ def install_extension(sd: Optional[Path] = None) -> Dict[str, Any]:
     sd = sd or state_dir()
     if not sd:
         return {"installed": False, "reason": "hermes-webui state directory not found"}
-    dest = sd / "extensions" / PLUGIN_ID
-    if dest.exists():
-        shutil.rmtree(dest)
+    final = sd / "extensions" / PLUGIN_ID
+    dest = sd / "extensions" / f".{PLUGIN_ID}.tmp-{os.getpid()}"     # build aside, then swap: a killed process never
+    shutil.rmtree(dest, ignore_errors=True)                           # leaves WebUI with half an extension
     shutil.copytree(SRC, dest)
     shutil.copytree(NOVNC, dest / "assets" / "novnc")          # one copy of noVNC in the repo; copied at install
     man_path = dest / "manifest.json"                          # the sidecar port is baked into the manifest (TAKEOVER_PORT)
@@ -83,6 +98,12 @@ def install_extension(sd: Optional[Path] = None) -> Dict[str, Any]:
             ext["sidecar"]["origin"] = f"http://127.0.0.1:{port()}"
     man_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     files = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
+    old = sd / "extensions" / f".{PLUGIN_ID}.old-{os.getpid()}"
+    if final.exists():
+        os.replace(final, old)
+    os.replace(dest, final)
+    shutil.rmtree(old, ignore_errors=True)
+    dest = final
     man = state.read_json(sd / INSTALL_MANIFEST) or {}
     if not isinstance(man.get("installed"), dict):
         man = {"version": 1, "installed": {}}
@@ -139,12 +160,10 @@ def ensure_sidecar(home, restart: bool = False) -> Dict[str, Any]:
     """Make sure a sidecar is answering. Returns ``{running, started, version, ...}``. Never raises."""
     try:
         h = health()
-        if h and not restart and h.get("version") == __version__:
-            other = bool(h.get("home_id")) and h["home_id"] != home_id(home)
-            # a sidecar serves ONE Hermes home (the control lease lives there). The first one wins; an explicit
-            # `hermes takeover webui` takes over for this profile.
-            return {"running": True, "started": False, "version": h.get("version"), "other_profile": other}
-        if h:                                                   # stale version, or an explicit restart
+        if h and not restart and not older(h.get("version")):
+            # one service serves every profile (?profile=), so whoever started it is fine; only an older copy is replaced
+            return {"running": True, "started": False, "version": h.get("version")}
+        if h:                                                   # older version, or an explicit restart
             stop_sidecar(home)
         sd = state_dir()
         env = dict(os.environ)
@@ -175,7 +194,8 @@ def status(home) -> Dict[str, Any]:
     h = health(0.5)
     return {"detected": bool(sd), "state_dir": str(sd) if sd else None, "extension": installed_version(sd),
             "sidecar": bool(h), "sidecar_version": (h or {}).get("version"), "enabled": enabled(),
-            "serves_this_profile": bool(h) and (not h.get("home_id") or h["home_id"] == home_id(home))}
+            "serves_this_profile": bool(h) and (bool(h.get("multi_profile")) or not h.get("home_id")
+                                                or h["home_id"] == home_id(home))}
 
 
 def enabled() -> bool:
@@ -189,7 +209,7 @@ def integrate(home, force: bool = False) -> Dict[str, Any]:
     if not sd or (not force and not enabled()):
         return {"detected": bool(sd), "disabled": bool(sd)}
     out: Dict[str, Any] = {"detected": True, "state_dir": str(sd)}
-    if force or installed_version(sd) != __version__ or not (sd / "extensions" / PLUGIN_ID / "manifest.json").exists():
+    if force or older(installed_version(sd)) or not (sd / "extensions" / PLUGIN_ID / "manifest.json").exists():
         out["extension"] = install_extension(sd)
     out["sidecar"] = ensure_sidecar(home, restart=force)
     return out

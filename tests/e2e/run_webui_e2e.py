@@ -103,9 +103,16 @@ try:
     check("before approval the page explains the one-time step", "approval" in state_text(A).lower(), state_text(A))
     A.screenshot(f"{SHOTS}/1-needs-approval.png")
 
-    # ── the one manual step: consent (what Settings -> Extensions -> Approve does) ──
-    r = A.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:true})}).then(r=>r.status)", True)
-    check("approving the proxy succeeds (WebUI auth on, token-v1)", r == 200, r)
+    # ── the one manual step, as a user does it: "Allow Takeover" -> WebUI's own highlighted consent button ──
+    check("the page offers a one-tap 'Allow Takeover'", has(A, "#mainTakeover [data-f=approve]"))
+    clk(A, "#mainTakeover [data-f=approve]")
+    A.wait("!!document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]')", 20)
+    check("it lands on WebUI's own consent button for Takeover, highlighted",
+          A.eval("document.querySelector('[data-extension-sidecar-proxy-id=\"takeover\"]').textContent").strip().lower().startswith("approve"))
+    A.screenshot(f"{SHOTS}/1b-approval-highlighted.png")
+    A.eval("document.querySelector('[data-extension-sidecar-proxy-id=\"takeover\"]').click()")
+    A.wait("window.__hermesTakeover.state().active", 20)
+    check("after the user approves, the Screen page comes back by itself", A.eval("window.__hermesTakeover.state().active"))
 
     check("after consent the sidecar refuses a wrong token (401)", raw(f"http://127.0.0.1:{PORT}/api/status", headers={"X-Hermes-Sidecar-Token": "nope"}) == 401)
     A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent==='Screen is off'", 30)
@@ -397,6 +404,26 @@ addEventListener('scroll',u);addEventListener('contextmenu',e=>{window.x++;u();e
     check("WebUI's own plugin open button lands on the live Screen page, not the sandboxed copy",
           G.eval("window.__hermesTakeover.state().active && !document.querySelector('#pluginPageContainer iframe')"))
     G.call("Page.close")
+    # ── a request from another profile (p2) shows up while WebUI shows the default profile ──
+    P2 = os.path.join(HOME, "profiles", "p2")
+    if os.path.isdir(os.path.join(P2, "plugins", "takeover")):
+        code = f"""
+import sys, os, importlib.util
+sys.path.insert(0, {AGENT_DIR!r}); os.environ['HERMES_HOME']={P2!r}
+root = os.path.join({P2!r}, 'plugins', 'takeover', 'takeover_core')
+spec = importlib.util.spec_from_file_location('hermes_takeover_core', os.path.join(root, '__init__.py'), submodule_search_locations=[root])
+m = importlib.util.module_from_spec(spec); sys.modules['hermes_takeover_core'] = m; spec.loader.exec_module(m)
+m.state.create_request({P2!r}, 'Sign in to the p2 account')
+"""
+        subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60, env=dict(os.environ, TAKEOVER_NO_BOOTSTRAP="1"))
+        H = page(chrome)
+        H.wait("!!document.querySelector('.hdo-global-take') && /p2/.test(document.querySelector('.hdo-global').textContent)", 40)
+        check("a request from another profile shows in the banner, naming the profile", "Sign in to the p2 account" in H.eval("document.querySelector('.hdo-global').textContent"))
+        H.eval("document.querySelector('.hdo-global-take').click()")
+        H.wait("window.__hermesTakeover.state().active && window.__hermesTakeover.profile()==='p2'", 20)
+        check("one tap opens the Screen page for THAT profile", H.eval("window.__hermesTakeover.profile()") == "p2")
+        H.screenshot(f"{SHOTS}/14-other-profile.png")
+        H.call("Page.close")
 finally:
     chrome.close()
     if term: term.terminate()
