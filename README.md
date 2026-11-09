@@ -17,13 +17,15 @@ One native Hermes plugin. No tunnel, no reverse proxy, no extra port to open, no
 hermes plugins install shoumikgoswami/Hermes-takeover --enable
 ```
 
-Then just use Hermes. The first agent session wires everything up (below). Remove with `hermes plugins remove takeover`;
-within a few seconds its WebUI service notices, removes the Screen page from WebUI and exits.
+That's it. Right after install (no new chat, no command) Takeover sets itself up in the background: the screen packages,
+the agent's visible browser, the hermes-webui Screen page and its service, and WebUI's one-time approval. **Reload WebUI
+once** (WebUI loads extensions when a page loads) and the **Screen** button is in the side rail. Remove with
+`hermes plugins remove takeover`; within a few seconds its service removes the Screen page from WebUI and exits.
 
-| Surface | How it appears | Your one manual step |
-|---|---|---|
-| **hermes-webui** (the `:8787` app). Takeover shows in two places: **Settings → Plugins** lists the Hermes plugin (tool and hooks) with an **Open Screen** button; **Settings → Extensions** lists the Screen page and its service. WebUI only gives extensions a backend, so the live screen has to be an extension. | A **Screen** icon in the rail / phone nav; while the agent is asking, a banner on every page with **Take over** (one tap) and **Just watch**. A link to `<webui>/#takeover` does the same. | Settings → Extensions → Diagnostics → Loopback sidecars → **Takeover** → **Approve proxy**. That is WebUI's own security consent, and WebUI authentication must be on (Settings → set a password). The Screen page tells you this until you do it. |
-| **Hermes dashboard** (`hermes dashboard`) | A **Screen** tab; the same banner on every page (one-tap **Take over** = `/takeover?take=1`) | none (restart the dashboard once if it was already running) |
+| Surface | How it appears |
+|---|---|
+| **hermes-webui** | A **Screen** button in the side rail (phone: bottom nav); while the agent is asking, a banner on every page with **Take over** (one tap) and **Just watch**; a **Takeover** card in **Settings → Plugins** with live status and **Open Screen**. `<webui>/#takeover` opens it too. |
+| **Hermes dashboard** (`hermes dashboard`) | A **Screen** tab and the same banner (one-tap **Take over** = `/takeover?take=1`). Restart the dashboard once if it was already running. |
 
 ### What "first run" does (automatically, once)
 
@@ -32,12 +34,14 @@ within a few seconds its WebUI service notices, removes the Screen page from Web
 | Screen packages (TigerVNC + Xfce) | Installed through **Hermes's own Bot Desktop installer** (the one the Desktop app's Install button uses). That installer escalates to root, so it works unattended only where root needs no password; otherwise Takeover shows the exact command and a **Run setup** button. |
 | TigerVNC specifically | Many images ship a TightVNC `Xvnc`; it passes a "binary exists" check but cannot start Bot Desktop. Takeover detects it and says how to fix it. |
 | Agent's Chrome visible | Sets `browser.headed: true` through the config API. |
-| hermes-webui (if on this host) | Copies the Screen page into WebUI's extensions folder (loads on the next page render, no WebUI restart) and starts Takeover's small loopback service, detached. The next agent session restarts it if it is not running. |
+| hermes-webui (if on this host) | Copies the Screen page into WebUI's extensions folder (loads on the next page render, no WebUI restart) and starts Takeover's small loopback service, detached. One service serves every profile. |
+| WebUI's approval | WebUI asks before an extension may use its own service (Settings → Extensions → Diagnostics). Enabling the plugin is that consent: the first time a WebUI page loads after install, the Screen page grants it through WebUI's own endpoint, once. If you revoke it later in WebUI, that sticks (the Screen page then offers **Allow Takeover**, which takes you to the exact button). WebUI only allows this when it has a password set. Opt out: `webui_auto_approve: false`. |
 | Python packages | **None.** Everything is stdlib or already in Hermes; noVNC 1.6.0 is bundled (no CDN). |
 
-Triggers: first agent session, first Screen visit, first `request_takeover`, or `hermes takeover setup` / `hermes takeover webui`.
-It runs once automatically; afterwards only on request. Switches (`hermes config set plugins.entries.takeover.settings.<key> false`):
-`auto_install` (packages + headed browser), `webui_integration` (never touch hermes-webui), `fence_browser_tools`
+When: the moment Hermes loads the plugin after install (a detached helper, so even a short `hermes ...` command starts it;
+never from `plugins doctor` / `validate`), plus first Screen visit and first `request_takeover` as fallbacks, or by hand
+with `hermes takeover setup` / `hermes takeover webui`. Package setup is attempted once automatically; afterwards only on request. Switches (`hermes config set plugins.entries.takeover.settings.<key> false`):
+`auto_install` (packages + headed browser), `webui_integration` (never touch hermes-webui), `webui_auto_approve`, `fence_browser_tools`
 (pause browser tools while you hold control) and `takeover_hints` (the nudge below). Linux only (Bot Desktop is
 Linux-only); the tool hides itself elsewhere.
 
@@ -112,17 +116,17 @@ byte rides WebUI's authenticated proxy, no ticket, extra port or CSP change is n
 - The plugin runs with your user's permissions, like any Hermes plugin. Its only privileged action is the package install,
   delegated to Hermes's Bot Desktop installer; it has no code path of its own that escalates privileges. Its only writes
   outside its data dir (`<profile>/plugin-data/takeover/`): `browser.headed` in config, and (WebUI) the extension folder + install manifest in WebUI's state dir.
-- A WebUI service serves **one Hermes profile** (the lease lives in the profile's home). The first profile to start it wins;
-  `hermes takeover webui` from another profile takes it over; `hermes takeover status` says when it is serving a different one.
-  Port clash? `TAKEOVER_PORT=<n> hermes takeover webui` rewrites the extension to match. Switching profiles inside WebUI does
-  not switch the Screen page; it keeps showing the profile the service serves.
-- The WebUI service is started by an agent session (or `hermes takeover webui`); after a reboot the Screen page says the
-  service is down until the next agent session starts it. There is no systemd unit, by design.
+- One WebUI service serves **every profile**: the page sends WebUI's active profile and the service uses that profile's
+  Hermes home (lease, screen, requests), only where Takeover is installed. Switching profiles in WebUI switches the Screen
+  page; a request from another profile still shows in the banner, naming the profile, and one tap answers it there.
+  Port clash? `TAKEOVER_PORT=<n> hermes takeover webui` rewrites the extension to match. With several profiles on different
+  Takeover versions, the newest one's page and service win (never downgraded).
+- The WebUI service is started whenever Hermes loads the plugin (any agent session or `hermes` command); after a reboot the
+  Screen page says the service is down until then. There is no systemd unit, by design.
 - One pending request per profile: two agent sessions of the same profile asking at once share one request card.
-- hermes-webui's **Settings → Plugins** lists the plugins of WebUI's own Hermes home (normally the default profile),
-  whichever profile you chat in. A Takeover installed only in another profile works but is not listed there.
-- hermes-webui also lists the plugin's dashboard tab as "Screen". WebUI opens such tabs in a sandboxed iframe that cannot
-  load its script while WebUI auth is on, so Takeover sends that tab's Open button to the live Screen page instead.
+- hermes-webui's own **Settings → Plugins** list only covers WebUI's own Hermes home (normally the default profile) and only
+  refreshes when WebUI restarts; Takeover's page adds its card there itself, so it shows wherever it is installed. WebUI
+  would also list the plugin's dashboard tab as "Screen" (a sandboxed page with no backend); that duplicate is hidden.
 
 ## Requirements and limits
 
@@ -146,9 +150,9 @@ takeover_core/  compat (hermes-agent seam) · setup (first run) · control (leas
 dashboard/      manifest.json · plugin_api.py (routes + WebSocket) · dist/ (index.js, style.css, novnc/ 1.6.0 vendored)
 webui/          manifest.json · assets/takeover.js + takeover.css + touch.js (phone gestures)   (noVNC is copied in from dashboard/dist at install)
 skills/takeover/SKILL.md
-tests/          test_core.py (51) · test_sidecar.py (27) · test_hermes_integration.py (5: through Hermes's own plugin loader,
-                hook dispatch, prompt rendering, `plugins doctor --ci` and `plugins validate`)
-                e2e/run_e2e.py (dashboard, 25) · e2e/run_webui_e2e.py (WebUI, 44, incl. touch gestures and the one-tap banner)
+tests/          test_core.py (54) · test_sidecar.py (35) · test_hermes_integration.py (6: through Hermes's own plugin loader,
+                hook dispatch, prompt rendering, `plugins doctor --ci`, `plugins validate`, first run right after install)
+                e2e/run_e2e.py (dashboard, 25) · e2e/run_webui_e2e.py (WebUI, 60) via e2e/fresh_webui_e2e.sh (scratch home + 2nd profile + scratch WebUI)
 ```
 
 ## Tests
