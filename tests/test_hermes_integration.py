@@ -96,10 +96,8 @@ class TestFirstRunRightAfterInstall(unittest.TestCase):
         subprocess.run(["hermes", "plugins", "doctor", str(ROOT), "--ci"], capture_output=True, text=True, timeout=180, env=env)
         time.sleep(2)
         self.assertFalse((sd / "extensions" / "takeover").exists(), "doctor must not install into WebUI")
-        # 2. the installed copy, as Hermes loads it (discover_plugins -> register): bootstraps once
-        code = ("import sys,time; sys.path.insert(0, %r)\n"
-                "from hermes_cli import plugins as P; P.discover_plugins(); time.sleep(3)\n") % AGENT
-        subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=180, env=env)
+        # 2. any ordinary, short-lived `hermes` command loads the installed copy: that alone must start the first run
+        subprocess.run(["hermes", "takeover", "status"], capture_output=True, text=True, timeout=180, env=env)
         health = None
         for _ in range(90):
             try:

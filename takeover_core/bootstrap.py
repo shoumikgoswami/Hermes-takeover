@@ -84,15 +84,14 @@ def kick(home=None) -> bool:
         if not installed_copy(home):
             return False
 
-        def work() -> None:
-            try:
-                n = needs(home)
-                if n["setup"] or n["webui"]:
-                    spawn(home)
-            except Exception:  # noqa: BLE001
-                pass
-        threading.Thread(target=work, name="takeover-bootstrap", daemon=True).start()
-        return True
+        # Inline, not in a thread: the loading process may be a short `hermes ...` command that exits before a thread
+        # would get to spawn. The check is a few file reads and one loopback request (milliseconds); the slow part runs
+        # in the detached helper.
+        n = needs(home)
+        if n["setup"] or n["webui"]:
+            spawn(home)
+            return True
+        return False
     except Exception:  # noqa: BLE001
         return False
 

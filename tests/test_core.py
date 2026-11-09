@@ -602,7 +602,6 @@ class TestBootstrap(Base):
         try:
             self.assertTrue(core.bootstrap.kick(HOME))
             self.assertFalse(core.bootstrap.kick(HOME))
-            time.sleep(0.5)
         finally:
             core.bootstrap.installed_copy, core.bootstrap.needs, core.bootstrap.spawn = saved, saved_needs, saved_spawn
         self.assertEqual(calls, [HOME])
