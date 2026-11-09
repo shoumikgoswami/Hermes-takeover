@@ -887,19 +887,23 @@ function __hermesTakeoverWebuiPost(path, body) {
     if (!card) return;
     const st = card.querySelector('[data-c=status]');
     if (!st) return;
-    if (!lastPulse) { st.textContent = AC.error === 'nopassword' ? 'Waiting for a WebUI password (Settings → Password).' : 'Service: connecting…'; return; }
-    const req = lastPulse.request && lastPulse.request.status === 'pending' ? lastPulse.request : null;
-    const lease = lastPulse.lease || {};
-    st.textContent = 'Profile: ' + (lastPulse.profile || prof()) + ' · ' +
-      (req ? 'the agent needs you: ' + req.reason : lease.holder === 'human' ? 'you have control' : 'the agent is driving');
+    let text;
+    if (!lastPulse) text = AC.error === 'nopassword' ? 'Waiting for a WebUI password (Settings → Password).' : 'Service: connecting…';
+    else {
+      const req = lastPulse.request && lastPulse.request.status === 'pending' ? lastPulse.request : null;
+      const lease = lastPulse.lease || {};
+      text = 'Profile: ' + (lastPulse.profile || prof()) + ' · ' +
+        (req ? 'the agent needs you: ' + req.reason : lease.holder === 'human' ? 'you have control' : 'the agent is driving');
+    }
+    if (st.textContent !== text) st.textContent = text;          // only real changes: this runs from a MutationObserver
   }
   function decoratePluginCards() {
     const list = document.getElementById('pluginsList');
     if (!list || list.style.display === 'none' && !list.children.length) return;
     // hide the dashboard-tab duplicate (it has WebUI's own tab link / enable toggle)
     list.querySelectorAll('.plugin-card[data-plugin="takeover"]').forEach((c) => {
-      if (c.classList.contains('hdo-plugin-card')) return;
-      if (c.querySelector('.plugin-enable-toggle') || c.querySelector('a.plugin-open-btn')) c.style.display = 'none';
+      if (c.classList.contains('hdo-plugin-card') || c.classList.contains('hdo-plugin-native') || c.dataset.hdoHidden) return;
+      if (c.querySelector('.plugin-enable-toggle') || c.querySelector('a.plugin-open-btn')) { c.dataset.hdoHidden = '1'; c.style.display = 'none'; }
       else c.classList.add('hdo-plugin-native');
     });
     // one Takeover card: decorate WebUI's own (agent plugin) card, or add ours when WebUI does not list it
@@ -919,8 +923,8 @@ function __hermesTakeoverWebuiPost(path, body) {
       card.className = 'provider-card plugin-card hdo-plugin-card'; card.dataset.plugin = 'takeover-ext';
       card.innerHTML = pluginCardHtml();
       list.insertBefore(card, list.firstChild);
-      list.style.display = '';
-      const empty = document.getElementById('pluginsEmpty'); if (empty) empty.style.display = 'none';
+      if (list.style.display === 'none') list.style.display = '';
+      const empty = document.getElementById('pluginsEmpty'); if (empty && empty.style.display !== 'none') empty.style.display = 'none';
     }
     const b = card && card.querySelector('[data-hdo-open]');
     if (b && !b.dataset.bound) { b.dataset.bound = '1'; b.addEventListener('click', (e) => { e.preventDefault(); onNavClick(true); }); }
@@ -930,7 +934,10 @@ function __hermesTakeoverWebuiPost(path, body) {
   }
   function watchPluginsPanel() {
     decoratePluginCards();
-    try { new MutationObserver(() => decoratePluginCards()).observe(document.body, { childList: true, subtree: true }); }
+    // Debounced and idempotent: decorating changes the DOM too, so never react synchronously to our own mutations.
+    let queued = false;
+    const later = () => { if (queued) return; queued = true; setTimeout(() => { queued = false; decoratePluginCards(); }, 120); };
+    try { new MutationObserver(later).observe(document.getElementById('pluginsList') ? document.getElementById('pluginsList').parentElement : document.body, { childList: true, subtree: true }); }
     catch (_) { /* old browser: the button is just missing */ }
     // WebUI's own open button for the dashboard tab would load the sandboxed copy: open the real page instead
     document.addEventListener('click', (e) => {

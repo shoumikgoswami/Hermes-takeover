@@ -22,6 +22,7 @@ TAKEOVER_NO_BOOTSTRAP=1 HERMES_HOME="$S/profiles/p2" hermes plugins install "fil
   HERMES_WEBUI_HOST=127.0.0.1 HERMES_WEBUI_PORT=8798 nohup "$V" server.py > "$BASE/webui.log" 2>&1 &)
 sleep 7
 TAKEOVER_NO_BOOTSTRAP=1 HERMES_HOME="$S" HERMES_WEBUI_STATE_DIR="$W" hermes takeover webui > /dev/null 2>&1
+if [ -n "${E2E_SETUP_ONLY:-}" ]; then echo "scratch WebUI on http://127.0.0.1:8798 (left running)"; exit 0; fi
 cd tests/e2e
 E2E_STATE="$W" E2E_HOME="$S" E2E_SHOTS="$BASE/shots" timeout 360 "$V" -W ignore run_webui_e2e.py > "$BASE/run.log" 2>&1
 rc=$?
