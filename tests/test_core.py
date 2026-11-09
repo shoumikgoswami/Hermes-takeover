@@ -27,6 +27,11 @@ TMP = tempfile.mkdtemp(prefix="takeover-test-")
 HOME = os.path.join(TMP, "home")
 os.makedirs(HOME)
 os.environ["HERMES_HOME"] = HOME
+# Never let a test reach the REAL service on the default port (stop_sidecar / ensure_sidecar act on whatever answers there):
+# pin the Takeover port to a private, currently free one for this process.
+import socket as _s
+with _s.socket() as _sk:
+    _sk.bind(("127.0.0.1", 0)); os.environ["TAKEOVER_PORT"] = str(_sk.getsockname()[1])
 
 import uvicorn  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
