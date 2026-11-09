@@ -7,6 +7,7 @@ import asyncio
 import http.client
 import importlib.util
 import json
+import shutil
 import logging
 import os
 import sys
@@ -214,6 +215,44 @@ class TestProfiles(Base):
 
     def test_health_says_it_serves_every_profile(self):
         self.assertTrue(self.req("GET", "/health", token=None)[1]["multi_profile"])
+
+
+class TestAutoApproveOnce(Base):
+    """Enabling the plugin is the consent, once: install writes the marker, the service records that it was used."""
+    def setUp(self):
+        super().setUp()
+        self.sd = Path(TMP) / "webui-ac"
+        shutil.rmtree(self.sd, ignore_errors=True); self.sd.mkdir()
+        self.saved = core.webui.state_dir
+        core.webui.state_dir = lambda: self.sd
+
+    def tearDown(self):
+        core.webui.state_dir = self.saved
+
+    def marker(self):
+        return json.loads((self.sd / "extensions" / "takeover" / "assets" / "autoconsent.json").read_text())
+
+    def test_fresh_install_asks_for_one_automatic_approval(self):
+        core.webui.install_extension(self.sd)
+        m = self.marker()
+        self.assertTrue(m["auto"]); self.assertTrue(m["nonce"])
+
+    def test_after_it_was_used_reinstalls_and_upgrades_do_not_reapprove(self):
+        core.webui.install_extension(self.sd)
+        nonce = self.marker()["nonce"]
+        self.assertTrue(self.req("POST", "/api/autoconsent-used", {"nonce": nonce})[1]["ok"])
+        self.assertEqual(self.marker(), {"auto": False})
+        core.webui.install_extension(self.sd)                         # e.g. an upgrade: a revoke must still stick
+        self.assertEqual(self.marker(), {"auto": False})
+
+    def test_opt_out(self):
+        saved = core.compat.setting
+        core.compat.setting = lambda k, d=None: False if k == "webui_auto_approve" else d
+        try:
+            core.webui.install_extension(self.sd)
+        finally:
+            core.compat.setting = saved
+        self.assertEqual(self.marker(), {"auto": False})
 
 
 class TestStream(Base):
