@@ -274,7 +274,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     '<li>You type passwords straight into the browser, never into chat.</li>' +
     '<li>Left without handing back? Use Force hand-back on the Screen page, or <code>/takeover release</code>.</li></ul>' +
     '<div class="hdo-side-foot">Feedback or ideas? <a href="mailto:' + FEEDBACK + '?subject=Takeover%20plugin%20feedback">' + FEEDBACK + '</a>' +
-    '<div class="hdo-side-ver">Takeover 0.5.0</div></div>' +
+    '<div class="hdo-side-ver">Takeover 0.5.1</div></div>' +
     '</div>';
 
   function renderSide(p) {
@@ -743,7 +743,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     if (!document.hidden) {
       const r = await api('/api/pulse', { viewer_id: S.viewer }, { timeout: 6000 });
       if (r.ok && r.lease) {
-        G.delay = 5000;
+        G.delay = 5000; G.needsApproval = false;
         if (AC.pending) markApproved();
         renderSide(r); renderPluginCard(r);
         const own = r.request && r.request.status === 'pending' ? r.request : null;
@@ -784,6 +784,8 @@ function __hermesTakeoverWebuiPost(path, body) {
         } else if (G.el) G.el.hidden = true;
       } else {
         G.delay = 60000;                   // not approved yet / sidecar down: stay quiet and cheap
+        G.needsApproval = r.http === 401 || r.http === 403 || r.http === 503;
+        try { renderPluginCard(null); } catch (_) { /* card not mounted */ }
         if (G.el) G.el.hidden = true;
         if (side) {
           const st = side.querySelector('[data-s=status]');
@@ -802,9 +804,10 @@ function __hermesTakeoverWebuiPost(path, body) {
     if (S.connected && !S.mine) { S.autoTake = 0; takeOver(); }
   }
 
-  // ── the one-time WebUI approval, in one tap ───────────────────────────────
-  // WebUI's consent belongs to WebUI: we never grant it ourselves. We take the user to the exact button (Settings ->
-  // Extensions -> Takeover's sidecar row), highlight it, and come back to the Screen page as soon as it is approved.
+  // ── the one-time WebUI approval, in one tap (the default path) ─────────────
+  // WebUI's consent is the user's decision: by default this page never grants it. It takes the user to the exact
+  // button (Settings -> Extensions -> Diagnostics -> Takeover's sidecar row), highlights it, and comes back to the
+  // Screen page as soon as it is approved. (Only the opt-in `webui_auto_approve: true` grants it, below.)
   async function goToApproval() {
     if (typeof window.switchPanel !== 'function') return;
     const t0 = Date.now(); S.approving = t0;
@@ -845,10 +848,11 @@ function __hermesTakeoverWebuiPost(path, body) {
     }, 400);
   }
 
-  // ── automatic approval (once) ─────────────────────────────────────────────
-  // Enabling the plugin is the consent: the first time this page loads after install it grants WebUI's sidecar consent
-  // through WebUI's own endpoint (which still refuses when WebUI has no password, and mints the token itself), then
-  // tells the service it is done so a later "Revoke" in WebUI is respected. Opt out: webui_auto_approve: false.
+  // ── automatic approval: OPT-IN only ───────────────────────────────────────
+  // Off by default (`webui_auto_approve: false`): the marker then says {auto:false} and nothing below runs; the user
+  // approves through goToApproval(). If the user opted in, the first page load grants WebUI's sidecar consent once
+  // through WebUI's own endpoint (which still refuses without a WebUI password and mints the token itself), then tells
+  // the service it is done so a later "Revoke" in WebUI is respected.
   const AC = { tried: false, busy: false, pending: null, error: null };
   async function autoApprove() {
     if (AC.tried) return; AC.tried = true; AC.busy = true;
@@ -911,7 +915,7 @@ function __hermesTakeoverWebuiPost(path, body) {
   let lastPulse = null;
   function pluginCardHtml() {
     return '<div class="provider-card-header plugin-card-header"><div class="provider-card-info">' +
-      '<div class="provider-card-name">Takeover</div><div class="provider-card-meta">takeover · v0.5.0</div></div>' +
+      '<div class="provider-card-name">Takeover</div><div class="provider-card-meta">takeover · v0.5.1</div></div>' +
       '<span class="provider-card-badge" data-c="badge">Enabled</span></div>' +
       '<div class="provider-card-body plugin-card-body">' +
       '<div class="provider-card-hint">When a step needs you (sign in, approve or authorize, a 2FA code, a CAPTCHA, a payment), the agent asks and you tap Take over. Do it in the agent\'s browser, then hand back.</div>' +
@@ -926,7 +930,8 @@ function __hermesTakeoverWebuiPost(path, body) {
     const st = card.querySelector('[data-c=status]');
     if (!st) return;
     let text;
-    if (!lastPulse) text = AC.error === 'nopassword' ? 'Waiting for a WebUI password (Settings → Password).' : 'Service: connecting…';
+    if (!lastPulse) text = AC.error === 'nopassword' ? 'Waiting for a WebUI password (Settings → Password).'
+      : G.needsApproval ? 'One step: open Screen and tap “Allow Takeover”.' : 'Service: connecting…';
     else {
       const req = lastPulse.request && lastPulse.request.status === 'pending' ? lastPulse.request : null;
       const lease = lastPulse.lease || {};
@@ -1001,7 +1006,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
       mount(); wrapCore(); watchPluginsPanel(); autoApprove();
       window.__hermesTakeover = {
-        version: '0.5.0', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
+        version: '0.5.1', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
         profile: () => prof(),
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,

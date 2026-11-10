@@ -2,7 +2,7 @@
 
 hermes-webui is a different app from ``hermes dashboard``. It loads *extensions* (front-end files from
 ``<state>/extensions/<id>/``) and reaches backends only through a loopback sidecar behind its authenticated proxy.
-This module does both halves for the user, with no manual steps:
+This module does both halves for the user; the only manual step is WebUI's own one-tap consent:
 
 * ``install_extension``  copy the bundled extension into WebUI's extension dir and record it exactly like the
                          WebUI gallery does (loads on the next page render; no WebUI restart)
@@ -10,9 +10,10 @@ This module does both halves for the user, with no manual steps:
 * ``integrate``          detect WebUI; do both; called automatically right after install and by ``hermes takeover setup``
 
 WebUI state dir: ``$HERMES_WEBUI_STATE_DIR`` (set whenever WebUI itself runs the agent), else ``~/.hermes/webui``.
-WebUI's sidecar consent (Settings -> Extensions -> Diagnostics) is granted ONCE by the page itself through WebUI's
-own endpoint (enabling the plugin is the consent; opt out with ``webui_auto_approve: false``); WebUI still requires
-authentication to be on (token-v1). A later revoke sticks (``AUTOCONSENT_RECORD``).
+WebUI's sidecar consent (Settings -> Extensions -> Diagnostics) is the user's decision: by default the Screen page
+takes them to WebUI's own Approve button in one tap and never grants it itself. Only with the opt-in
+``webui_auto_approve: true`` does the page grant it once through WebUI's own endpoint (a later revoke sticks,
+``AUTOCONSENT_RECORD``). WebUI requires authentication to be on for either (token-v1).
 """
 from __future__ import annotations
 
@@ -258,9 +259,10 @@ def status(home) -> Dict[str, Any]:
 
 
 def auto_approve_allowed(home=None) -> bool:
-    """``plugins.entries.takeover.settings.webui_auto_approve`` (default on): enabling the plugin is your consent for
-    its Screen page to use its own service, so the page grants WebUI's sidecar consent itself, ONCE per WebUI."""
-    return bool(compat.setting("webui_auto_approve", True, home=home))
+    """``plugins.entries.takeover.settings.webui_auto_approve`` (default OFF). WebUI's sidecar consent is the user's
+    decision (the service relays clicks and keystrokes into the agent's screen), so by default the Screen page only
+    guides the user to WebUI's own button. Only if the user opts in does the page grant it itself, once per WebUI."""
+    return compat.setting("webui_auto_approve", False, home=home) is True
 
 
 def autoconsent_marker(sd: Path) -> Dict[str, Any]:

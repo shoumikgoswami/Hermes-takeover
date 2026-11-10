@@ -5,8 +5,9 @@ When a step needs you (sign in, approve or authorize, a 2FA code, a CAPTCHA, a p
 
 **Where to find it**
 - **hermes-webui**: reload the page once. The **Screen** button is in the side rail (phone: bottom nav), Takeover is in
-  **Settings → Plugins**, and a banner with **Take over** appears whenever the agent asks. Nothing to approve: enabling
-  the plugin is the consent (WebUI needs a password set for that; the Screen page tells you if it doesn't have one).
+  **Settings → Plugins**, and a banner with **Take over** appears whenever the agent asks. The first time, WebUI
+  asks you once to allow Takeover's service: open **Screen**, tap **Allow Takeover**, then **Approve** on the highlighted
+  row (WebUI needs a password set; the Screen page tells you if it doesn't have one).
 - **Hermes dashboard**: a **Screen** tab (restart `hermes dashboard` if it was already running).
 - **Hermes Desktop**: turn on **Takeover** once in **Capabilities → Plugins** for the in-app alert, notification and status-bar chip.
   You take over in Desktop's own **Screen** pane (Agents → the agent → Screen → Take over).

@@ -18,8 +18,9 @@ hermes plugins install shoumikgoswami/Hermes-takeover --enable
 ```
 
 That's it. Right after install (no new chat, no command) Takeover sets itself up in the background: the screen packages,
-the agent's visible browser, the hermes-webui Screen page and its service, and WebUI's one-time approval. **Reload WebUI
-once** (WebUI loads extensions when a page loads) and the **Screen** button is in the side rail. Remove with
+the agent's visible browser, and the hermes-webui Screen page and its service. **Reload WebUI once** (WebUI loads
+extensions when a page loads) and the **Screen** button is in the side rail. The first time you open it, WebUI asks you
+once to allow Takeover's service: tap **Allow Takeover**, then **Approve** on the highlighted row. Remove with
 `hermes plugins remove takeover`; within a few seconds its service removes the Screen page from WebUI and exits.
 
 | Surface | How it appears |
@@ -37,7 +38,7 @@ once** (WebUI loads extensions when a page loads) and the **Screen** button is i
 | TigerVNC specifically | Many images ship a TightVNC `Xvnc`; it passes a "binary exists" check but cannot start Bot Desktop. Takeover detects it and says how to fix it. |
 | Agent's Chrome visible | Sets `browser.headed: true` through the config API. |
 | hermes-webui (if on this host) | Copies the Screen page into WebUI's extensions folder (loads on the next page render, no WebUI restart) and starts Takeover's small loopback service, detached. One service serves every profile. |
-| WebUI's approval | WebUI asks before an extension may use its own service (Settings → Extensions → Diagnostics). Enabling the plugin is that consent: the first time a WebUI page loads after install, the Screen page grants it through WebUI's own endpoint, once. If you revoke it later in WebUI, that sticks (the Screen page then offers **Allow Takeover**, which takes you to the exact button). WebUI only allows this when it has a password set. Opt out: `webui_auto_approve: false`. |
+| WebUI's approval | **Your decision, one tap.** WebUI asks before an extension may use its own service (Settings → Extensions → Diagnostics); this one relays your clicks and keys into the agent's screen, so Takeover never grants it on its own by default. The Screen page shows **Allow Takeover**, which takes you to WebUI's exact Approve button, highlighted, and comes back by itself. WebUI only allows this when it has a password set. Opt in to `webui_auto_approve: true` if you want the page to grant it once by itself (a later revoke in WebUI still sticks). |
 | Python packages | **None.** Everything is stdlib or already in Hermes; noVNC 1.6.0 is bundled (no CDN). |
 
 When: the moment Hermes loads the plugin after install (a detached helper, so even a short `hermes ...` command starts it;

@@ -140,13 +140,17 @@ def dismiss() -> Dict[str, Any]:
 
 # ── the live stream ───────────────────────────────────────────────────────────
 def _origin_ok(ws: WebSocket) -> bool:
-    """The dashboard's own WebSocket guard (Host header, Origin, peer address) when available, else same-host Origin."""
+    """Strict same-origin check for the stream upgrade (no private dashboard internals): the browser's Origin must be
+    an http(s) origin naming exactly the host the page connected to. A missing Origin (non-browser clients) is refused.
+    The stream also needs a single-use ticket minted by an authenticated dashboard request, so this is the second gate."""
+    origin, host = ws.headers.get("origin"), ws.headers.get("host")
+    if not origin or not host:
+        return False
     try:
-        from hermes_cli.web_server_chat import _ws_request_is_allowed
-        return bool(_ws_request_is_allowed(ws))
-    except Exception:  # noqa: BLE001 - internals moved: fall back to a strict same-host check
-        origin, host = ws.headers.get("origin"), ws.headers.get("host")
-        return bool(origin and host and urlsplit(origin).netloc.lower() == host.lower())
+        o = urlsplit(origin)
+    except ValueError:
+        return False
+    return o.scheme in ("http", "https") and bool(o.netloc) and o.netloc.lower() == host.strip().lower()
 
 
 @router.websocket("/stream")

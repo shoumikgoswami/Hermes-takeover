@@ -1,5 +1,5 @@
 name: takeover
-version: 0.5.0
+version: 0.5.1
 manifest_version: 2
 description: "When a step needs you (sign-in, approve or authorize, 2FA code, CAPTCHA, payment), the agent asks and you tap Take over in hermes-webui, the Hermes dashboard or Hermes Desktop (alert + Screen pane), even on your phone. Do it in the agent's browser, hand back, and it carries on."
 author: Shoumik Goswami
@@ -33,5 +33,5 @@ config_schema:
     description: "When a browser result shows a step only you should do (sign-in, approve/authorize, 2FA code, payment, CAPTCHA), remind the agent to call request_takeover instead of doing it."
   webui_auto_approve:
     type: bool
-    default: true
-    description: "Enabling the plugin is your consent: its hermes-webui Screen page approves its own service in WebUI once (WebUI must have a password set). Revoking it later in WebUI sticks. Set false to approve by hand."
+    default: false
+    description: "Off by default: hermes-webui asks you once before the Screen page may use its service (it relays your clicks and keys into the agent's screen); the Screen page takes you to that button in one tap. Set true to let the page grant that consent itself, once (a later revoke in WebUI still sticks)."

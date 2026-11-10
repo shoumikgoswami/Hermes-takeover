@@ -94,22 +94,15 @@ try:
     A.wait("!!window.__hermesTakeover && !!document.querySelector('.rail .hdo-rail')", 40)
     check("extension loaded by WebUI: Screen rail + phone-nav entries", has(A, ".rail .hdo-rail") and has(A, ".sidebar-nav .hdo-nav"))
 
-    # ── no manual approval: enabling the plugin was the consent; the first page load approved it through WebUI ──
-    js(A, "window.__hermesTakeover.open()")
-    A.wait("document.querySelector('#mainTakeover [data-f=state]').textContent==='Screen is off'", 40)
-    check("approved automatically on first load: the Screen page works with no clicks", True)
-    consents = A.eval("fetch('/api/extensions/status',{credentials:'same-origin'}).then(r=>r.json()).then(j=>JSON.stringify(j))", True)
-    check("...through WebUI's own consent (recorded by WebUI, token minted)", '"takeover"' in consents and os.path.exists(os.path.join(STATE, "sidecar-auth", "takeover.token")))
+    # ── default: the page never grants WebUI's consent itself; it explains the one step ──
     marker = json.load(open(os.path.join(STATE, "extensions", "takeover", "assets", "autoconsent.json")))
-    check("...and only once (marker switched off, record kept)", marker == {"auto": False} and os.path.exists(os.path.join(STATE, "takeover-autoconsent.json")), str(marker))
-
-    # ── a revoke in WebUI is respected: no automatic re-approval; the page offers the guided manual step ──
-    A.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:false})}).then(r=>r.status)", True)
-    A.call("Page.reload"); time.sleep(1)
-    A.wait("!!window.__hermesTakeover", 40)
+    check("default install: no automatic approval (marker auto:false)", marker == {"auto": False}, str(marker))
     js(A, "window.__hermesTakeover.open()")
     A.wait("/allow takeover/i.test(document.querySelector('#mainTakeover [data-f=state]').textContent)", 30)
-    check("after you revoke it in WebUI, it stays revoked and the page explains the one step", "allow takeover" in state_text(A).lower(), state_text(A))
+    time.sleep(3)                                  # give any (wrong) self-approval time to happen
+    consents = A.eval("fetch('/api/extensions/status',{credentials:'same-origin'}).then(r=>r.json()).then(j=>JSON.stringify(j))", True)
+    check("...WebUI has no consent for Takeover until the user gives it", not os.path.exists(os.path.join(STATE, "sidecar-auth", "takeover.token"))
+          and "allow takeover" in state_text(A).lower(), state_text(A))
     A.screenshot(f"{SHOTS}/1-needs-approval.png")
 
     # ── the guided manual step: "Allow Takeover" -> WebUI's own highlighted consent button ──
@@ -125,6 +118,7 @@ try:
     A.eval("document.querySelector('.hdo-approve-here [data-extension-sidecar-proxy-id=\"takeover\"]').click()")
     A.wait("window.__hermesTakeover.state().active && document.querySelector('#mainTakeover [data-f=state]').textContent==='Screen is off'", 30)
     check("after the user approves, the Screen page comes back by itself", A.eval("window.__hermesTakeover.state().active"))
+    check("...through WebUI's own consent (token minted by WebUI)", os.path.exists(os.path.join(STATE, "sidecar-auth", "takeover.token")))
 
     check("after consent the sidecar refuses a wrong token (401)", raw(f"http://127.0.0.1:{PORT}/api/status", headers={"X-Hermes-Sidecar-Token": "nope"}) == 401)
     check("after approval: screen off on a fresh home, Start offered", has(A, "#mainTakeover [data-f=start]"))
@@ -443,6 +437,35 @@ m.state.create_request({P2!r}, 'Sign in to the p2 account')
               H.eval("fetch('/api/extensions/takeover/sidecar/api/status?profile=p2',{credentials:'same-origin'}).then(r=>r.json()).then(j=>j.hermes_home)", True).endswith("/profiles/p2"))
         H.screenshot(f"{SHOTS}/14-other-profile.png")
         H.call("Page.close")
+
+    # ── opt-in only: with webui_auto_approve: true the page grants WebUI's consent once; a later revoke sticks ──
+    A2 = page(chrome)
+    A2.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:false})}).then(r=>r.status)", True)
+    cfg = os.path.join(HOME, "config.yaml")
+    import yaml
+    c = yaml.safe_load(open(cfg)) if os.path.exists(cfg) else {}
+    c = c or {}
+    c.setdefault("plugins", {}).setdefault("entries", {}).setdefault("takeover", {}).setdefault("settings", {})["webui_auto_approve"] = True
+    yaml.safe_dump(c, open(cfg, "w"))
+    subprocess.run(["hermes", "takeover", "webui"], capture_output=True, text=True, timeout=120,
+                   env=dict(os.environ, HERMES_HOME=HOME, HERMES_WEBUI_STATE_DIR=STATE, TAKEOVER_PORT=PORT, TAKEOVER_NO_BOOTSTRAP="1"))
+    marker = json.load(open(os.path.join(STATE, "extensions", "takeover", "assets", "autoconsent.json")))
+    check("opt-in (webui_auto_approve: true): the marker asks for one automatic approval", marker.get("auto") is True, str(marker))
+    A2.call("Page.reload"); time.sleep(1)
+    A2.wait("!!window.__hermesTakeover", 40)
+    js(A2, "window.__hermesTakeover.open()")
+    A2.wait("document.querySelector('#mainTakeover [data-f=state]').textContent!=='Connecting…' && !/allow takeover/i.test(document.querySelector('#mainTakeover [data-f=state]').textContent)", 40)
+    check("...the page granted it through WebUI's own endpoint, no clicks", "allow takeover" not in state_text(A2).lower(), state_text(A2))
+    time.sleep(2)
+    marker = json.load(open(os.path.join(STATE, "extensions", "takeover", "assets", "autoconsent.json")))
+    check("...only once (marker switched off, record kept)", marker == {"auto": False} and os.path.exists(os.path.join(STATE, "takeover-autoconsent.json")), str(marker))
+    A2.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:false})}).then(r=>r.status)", True)
+    A2.call("Page.reload"); time.sleep(1)
+    A2.wait("!!window.__hermesTakeover", 40)
+    js(A2, "window.__hermesTakeover.open()")
+    A2.wait("/allow takeover/i.test(document.querySelector('#mainTakeover [data-f=state]').textContent)", 30)
+    check("...and a revoke in WebUI after that sticks", "allow takeover" in state_text(A2).lower(), state_text(A2))
+    A2.call("Page.close")
 finally:
     chrome.close()
     if term: term.terminate()

@@ -57,15 +57,45 @@ def handle(args: Dict[str, Any], **kwargs: Any) -> str:
         return _out("error", f"request_takeover failed: {type(exc).__name__}: {exc}")
 
 
-def call_budget() -> Optional[float]:
-    """Seconds this tool call may block. Hermes stops any tool call after its tool deadline (420 s by default,
-    ``timeouts.tools.sequential_call``) and interrupts it; waiting longer would lose the answer. None = no deadline."""
+HERMES_TOOL_DEADLINE = 420.0       # Hermes' documented default for one tool call
+
+
+def _seconds(v: Any) -> Optional[float]:
+    """A config/env timeout as seconds; None when unset or invalid (bools and NaN are invalid, as in Hermes)."""
+    if v is None or isinstance(v, bool):
+        return None
     try:
-        from agent.tool_executor import _resolve_sequential_tool_timeout
-        t = _resolve_sequential_tool_timeout()
-    except Exception:  # noqa: BLE001 - older / newer Hermes: assume the documented default
-        t = 420.0
-    if t is None or t <= 0:
+        f = float(str(v).strip()) if isinstance(v, str) else float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
+def tool_deadline() -> Optional[float]:
+    """Hermes' deadline for one tool call, read from config through the public ``load_config_readonly``:
+    ``timeouts.tools.sequential_call``, else ``timeouts.tools.concurrent_batch`` (else the legacy
+    ``HERMES_CONCURRENT_TOOL_TIMEOUT_S``), else 420 s. ``0`` or negative means no deadline (None)."""
+    tools: Dict[str, Any] = {}
+    try:
+        from hermes_cli.config import load_config_readonly
+        section = (load_config_readonly() or {}).get("timeouts") or {}
+        tools = section.get("tools") or {} if isinstance(section, dict) else {}
+        tools = tools if isinstance(tools, dict) else {}
+    except Exception:  # noqa: BLE001 - unreadable config: Hermes itself falls back to its defaults
+        tools = {}
+    import os
+    for v in (tools.get("sequential_call"), tools.get("concurrent_batch"), os.environ.get("HERMES_CONCURRENT_TOOL_TIMEOUT_S")):
+        t = _seconds(v)
+        if t is not None:
+            return None if t <= 0 else t
+    return HERMES_TOOL_DEADLINE
+
+
+def call_budget() -> Optional[float]:
+    """Seconds this tool call may block. Hermes stops any tool call after its tool deadline and interrupts it;
+    waiting longer would lose the answer, so return a margin before it. None = no deadline."""
+    t = tool_deadline()
+    if t is None:
         return None
     return max(20.0, float(t) - 45.0)
 

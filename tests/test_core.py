@@ -219,21 +219,20 @@ class TestTicketsAndOrigin(Base):
         self.assertEqual((j["ok"], j["error"]), (False, "screen_off"))
         self.assertEqual(self.post("/take-over", {"viewer_id": j["viewer_id"]})["error"], "screen_off")
 
-    def test_fallback_origin_guard_when_dashboard_internals_move(self):
+    def test_origin_guard_is_strict_same_origin_without_private_internals(self):
         class W:
             def __init__(s, h): s.headers = h
-        saved = sys.modules.get("hermes_cli.web_server_chat")
-        sys.modules["hermes_cli.web_server_chat"] = None          # `from hermes_cli.web_server_chat import ...` -> ImportError
-        try:
-            ok = self.real_origin_ok
-            self.assertTrue(ok(W({"origin": "https://h.example", "host": "h.example"})))
-            self.assertFalse(ok(W({"origin": "https://evil.example", "host": "h.example"})))
-            self.assertFalse(ok(W({"host": "h.example"})))
-        finally:
-            if saved is None:
-                sys.modules.pop("hermes_cli.web_server_chat", None)
-            else:
-                sys.modules["hermes_cli.web_server_chat"] = saved
+        ok = self.real_origin_ok
+        self.assertTrue(ok(W({"origin": "https://h.example", "host": "h.example"})))
+        self.assertTrue(ok(W({"origin": "http://127.0.0.1:9119", "host": "127.0.0.1:9119"})))
+        self.assertTrue(ok(W({"origin": "http://H.Example:80", "host": "h.example:80"})))
+        for bad in ({"origin": "https://evil.example", "host": "h.example"}, {"host": "h.example"}, {"origin": "https://h.example"},
+                    {"origin": "null", "host": "h.example"}, {"origin": "file://h.example", "host": "h.example"},
+                    {"origin": "http://127.0.0.1:9119", "host": "127.0.0.1:9120"}, {"origin": "http://h.example.evil", "host": "h.example"}):
+            self.assertFalse(ok(W(bad)), bad)
+        import inspect
+        src = inspect.getsource(sys.modules[self.real_origin_ok.__module__])
+        self.assertNotIn("_ws_request_is_allowed", src)
 
 
 class TestInputGate(Base):
@@ -443,9 +442,32 @@ class TestTool(Base):
         self.assertEqual(self.call(reason="sign in", wait_seconds=20)["status"], "completed")
         self.assertEqual(core.state.get_request(HOME)["id"], rid)
 
-    def test_hermes_deadline_is_read_from_hermes(self):
-        b = core.tool.call_budget()
-        self.assertTrue(b is None or 20 <= b < 420, b)              # default 420 s deadline minus a margin
+    def test_hermes_deadline_is_read_from_config_with_the_public_reader(self):
+        cfg = Path(HOME) / "config.yaml"
+        old = cfg.read_text() if cfg.exists() else None
+        saved_env = os.environ.pop("HERMES_CONCURRENT_TOOL_TIMEOUT_S", None)
+        try:
+            for text, want in (("", 420.0), ("timeouts:\n  tools:\n    sequential_call: 120\n", 120.0),
+                               ("timeouts:\n  tools:\n    concurrent_batch: 200\n", 200.0),
+                               ("timeouts:\n  tools:\n    sequential_call: 90\n    concurrent_batch: 200\n", 90.0),
+                               ("timeouts:\n  tools:\n    sequential_call: 0\n", None),
+                               ("timeouts:\n  tools:\n    sequential_call: true\n", 420.0),
+                               ("timeouts: nonsense\n", 420.0)):
+                cfg.write_text(text)
+                self.assertEqual(core.tool.tool_deadline(), want, text)
+            cfg.write_text("timeouts:\n  tools:\n    sequential_call: 120\n")
+            self.assertEqual(core.tool.call_budget(), 75.0)            # returns 45 s before Hermes would cut it off
+            cfg.write_text("timeouts:\n  tools:\n    sequential_call: 0\n")
+            self.assertIsNone(core.tool.call_budget())
+        finally:
+            if old is None:
+                cfg.unlink(missing_ok=True)
+            else:
+                cfg.write_text(old)
+            if saved_env is not None:
+                os.environ["HERMES_CONCURRENT_TOOL_TIMEOUT_S"] = saved_env
+        import inspect
+        self.assertNotIn("tool_executor", inspect.getsource(core.tool))
 
     def test_two_agents_share_one_card_and_one_leaving_does_not_remove_it(self):
         res = {}

@@ -231,27 +231,49 @@ class TestProfiles(Base):
         self.assertTrue(self.req("GET", "/health", token=None)[1]["multi_profile"])
 
 
-class TestAutoApproveOnce(Base):
-    """Enabling the plugin is the consent, once: install writes the marker, the service records that it was used."""
+class TestAutoApprove(Base):
+    """WebUI's consent is the user's decision: by default the page never grants it (the marker says auto:false and the
+    page only guides the user to WebUI's button). Only the opt-in webui_auto_approve: true grants it, once."""
     def setUp(self):
         super().setUp()
         self.sd = Path(TMP) / "webui-ac"
         shutil.rmtree(self.sd, ignore_errors=True); self.sd.mkdir()
-        self.saved = core.webui.state_dir
+        self.saved = core.webui.state_dir, core.compat.setting
         core.webui.state_dir = lambda: self.sd
 
     def tearDown(self):
-        core.webui.state_dir = self.saved
+        core.webui.state_dir, core.compat.setting = self.saved
+
+    def opt_in(self, value=True):
+        real = self.saved[1]
+        core.compat.setting = lambda k, d=None, **kw: value if k == "webui_auto_approve" else real(k, d, **kw)
 
     def marker(self):
         return json.loads((self.sd / "extensions" / "takeover" / "assets" / "autoconsent.json").read_text())
 
-    def test_fresh_install_asks_for_one_automatic_approval(self):
+    def test_default_never_grants_consent(self):
+        self.assertFalse(core.webui.auto_approve_allowed())
+        core.webui.install_extension(self.sd)
+        self.assertEqual(self.marker(), {"auto": False})
+
+    def test_manifest_default_is_off(self):
+        import yaml
+        schema = yaml.safe_load((ROOT / "plugin.yaml").read_text())["config_schema"]["webui_auto_approve"]
+        self.assertIs(schema["default"], False)
+
+    def test_only_an_explicit_true_opts_in(self):
+        for v in (None, "true", 1, "yes", False):
+            self.opt_in(v)
+            self.assertFalse(core.webui.auto_approve_allowed(), repr(v))
+
+    def test_opt_in_asks_for_one_automatic_approval(self):
+        self.opt_in()
         core.webui.install_extension(self.sd)
         m = self.marker()
         self.assertTrue(m["auto"]); self.assertTrue(m["nonce"])
 
-    def test_after_it_was_used_reinstalls_and_upgrades_do_not_reapprove(self):
+    def test_opt_in_after_it_was_used_reinstalls_and_upgrades_do_not_reapprove(self):
+        self.opt_in()
         core.webui.install_extension(self.sd)
         nonce = self.marker()["nonce"]
         self.assertTrue(self.req("POST", "/api/autoconsent-used", {"nonce": nonce})[1]["ok"])
@@ -259,23 +281,15 @@ class TestAutoApproveOnce(Base):
         core.webui.install_extension(self.sd)                         # e.g. an upgrade: a revoke must still stick
         self.assertEqual(self.marker(), {"auto": False})
 
-    def test_opt_out(self):
-        saved = core.compat.setting
-        core.compat.setting = lambda k, d=None, **kw: False if k == "webui_auto_approve" else d
-        try:
-            core.webui.install_extension(self.sd)
-        finally:
-            core.compat.setting = saved
-        self.assertEqual(self.marker(), {"auto": False})
-
-
     def test_a_wrong_nonce_does_not_switch_it_off(self):
+        self.opt_in()
         core.webui.install_extension(self.sd)
         self.assertFalse(core.webui.mark_autoconsent_used(self.sd, "not-the-nonce"))
         self.assertFalse(core.webui.mark_autoconsent_used(self.sd, "é"))
         self.assertTrue(self.marker()["auto"])
 
     def test_the_first_authenticated_request_records_it_without_the_page(self):
+        self.opt_in()
         core.webui.install_extension(self.sd)
         app = core.sidecar.App(); app._consent_recorded = False
         app.first_authenticated()                     # what any proxied, token-carrying request does first
