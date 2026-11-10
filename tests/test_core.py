@@ -49,6 +49,7 @@ def _load(name, path, **kw):
 
 core = _load("hermes_takeover_core", ROOT / "takeover_core" / "__init__.py", submodule_search_locations=[str(ROOT / "takeover_core")])
 api = _load("hermes_dashboard_plugin_takeover", ROOT / "dashboard" / "plugin_api.py")
+REAL_ORIGIN_OK = api._origin_ok          # captured once: test classes below swap in a loose stub for the HTTP tests
 plugin_init = _load("takeover_plugin_init", ROOT / "__init__.py")
 
 BD = core.compat.load()
@@ -111,7 +112,7 @@ class Base(unittest.TestCase):
                                                          "placement": "gateway", "installed": True})()
         rt.sandbox_screen_running = lambda: False
         cls.real_status = rt.status
-        cls.real_origin_ok = staticmethod(api._origin_ok)
+        cls.real_origin_ok = staticmethod(REAL_ORIGIN_OK)
         # same-host Origin check (the real dashboard guard is exercised by tests/e2e)
         api._origin_ok = lambda ws: (ws.headers.get("origin") or "").split("//")[-1] == ws.headers.get("host")
         app = FastAPI()
@@ -231,7 +232,7 @@ class TestTicketsAndOrigin(Base):
                     {"origin": "http://127.0.0.1:9119", "host": "127.0.0.1:9120"}, {"origin": "http://h.example.evil", "host": "h.example"}):
             self.assertFalse(ok(W(bad)), bad)
         import inspect
-        src = inspect.getsource(sys.modules[self.real_origin_ok.__module__])
+        src = inspect.getsource(api)
         self.assertNotIn("_ws_request_is_allowed", src)
 
 

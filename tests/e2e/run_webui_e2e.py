@@ -441,12 +441,8 @@ m.state.create_request({P2!r}, 'Sign in to the p2 account')
     # ── opt-in only: with webui_auto_approve: true the page grants WebUI's consent once; a later revoke sticks ──
     A2 = page(chrome)
     A2.eval("fetch('/api/extensions/sidecar-proxy-consent',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'takeover',approved:false})}).then(r=>r.status)", True)
-    cfg = os.path.join(HOME, "config.yaml")
-    import yaml
-    c = yaml.safe_load(open(cfg)) if os.path.exists(cfg) else {}
-    c = c or {}
-    c.setdefault("plugins", {}).setdefault("entries", {}).setdefault("takeover", {}).setdefault("settings", {})["webui_auto_approve"] = True
-    yaml.safe_dump(c, open(cfg, "w"))
+    subprocess.run(["hermes", "config", "set", "plugins.entries.takeover.settings.webui_auto_approve", "true"],     # how a user opts in
+                   capture_output=True, text=True, timeout=120, env=dict(os.environ, HERMES_HOME=HOME))
     subprocess.run(["hermes", "takeover", "webui"], capture_output=True, text=True, timeout=120,
                    env=dict(os.environ, HERMES_HOME=HOME, HERMES_WEBUI_STATE_DIR=STATE, TAKEOVER_PORT=PORT, TAKEOVER_NO_BOOTSTRAP="1"))
     marker = json.load(open(os.path.join(STATE, "extensions", "takeover", "assets", "autoconsent.json")))

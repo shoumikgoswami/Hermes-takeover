@@ -257,8 +257,8 @@ class TestAutoApprove(Base):
         self.assertEqual(self.marker(), {"auto": False})
 
     def test_manifest_default_is_off(self):
-        import yaml
-        schema = yaml.safe_load((ROOT / "plugin.yaml").read_text())["config_schema"]["webui_auto_approve"]
+        from hermes_yaml import safe_load              # Hermes' own YAML loader (PyYAML is not in its venv)
+        schema = safe_load((ROOT / "plugin.yaml").read_text())["config_schema"]["webui_auto_approve"]
         self.assertIs(schema["default"], False)
 
     def test_only_an_explicit_true_opts_in(self):
