@@ -20,7 +20,7 @@ TAKEOVER_NO_BOOTSTRAP=1 HERMES_HOME="$S" hermes plugins install "file://$REPO" -
 TAKEOVER_NO_BOOTSTRAP=1 HERMES_HOME="$S/profiles/p2" hermes plugins install "file://$REPO" --enable --yes-deps 2>&1 | grep -E "Block|rror"
 (cd "$WEBUI" && HERMES_HOME="$S" HERMES_WEBUI_STATE_DIR="$W" HERMES_WEBUI_PLUGINS_DIR="$S/plugins" HERMES_WEBUI_PASSWORD=e2e-pass-123 \
   HERMES_WEBUI_HOST=127.0.0.1 HERMES_WEBUI_PORT=8798 nohup "$V" server.py > "$BASE/webui.log" 2>&1 &)
-sleep 7
+for i in $(seq 1 60); do curl -s -m 2 -o /dev/null http://127.0.0.1:8798/ && break; sleep 1; done   # wait until WebUI answers
 TAKEOVER_NO_BOOTSTRAP=1 HERMES_HOME="$S" HERMES_WEBUI_STATE_DIR="$W" hermes takeover webui > /dev/null 2>&1
 if [ -n "${E2E_SETUP_ONLY:-}" ]; then echo "scratch WebUI on http://127.0.0.1:8798 (left running)"; exit 0; fi
 cd tests/e2e
