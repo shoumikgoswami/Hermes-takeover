@@ -83,7 +83,8 @@ class TestThroughHermes(unittest.TestCase):
 
 
 class TestFirstRunRightAfterInstall(unittest.TestCase):
-    """The installed copy, loaded the way Hermes loads it, wires hermes-webui and the screen with no new chat."""
+    """The installed copy, loaded the way Hermes loads it, wires hermes-webui with no new chat, and starts nothing
+    privileged (screen packages / browser.headed wait for a deliberate first use)."""
     PORT = "17977"
 
     def test_bootstrap_installs_the_webui_page_and_service_and_doctor_does_not(self):
@@ -114,6 +115,9 @@ class TestFirstRunRightAfterInstall(unittest.TestCase):
             self.assertIn("takeover", man["installed"])
             log = (Path(HOME) / "plugin-data" / "takeover" / "bootstrap.log").read_text()
             self.assertIn("'webui'", log)
+            self.assertNotIn("'mode': 'setup'", log)
+            st = Path(HOME) / "plugin-data" / "takeover" / "setup.json"
+            self.assertFalse(st.exists() and '"attempted_version"' in st.read_text(), "a plugin load must not run setup")
         finally:
             if health and health.get("pid"):
                 try: os.kill(int(health["pid"]), 15)

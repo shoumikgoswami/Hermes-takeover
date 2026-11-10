@@ -17,10 +17,11 @@ One native Hermes plugin. No tunnel, no reverse proxy, no extra port to open, no
 hermes plugins install shoumikgoswami/Hermes-takeover --enable
 ```
 
-That's it. Right after install (no new chat, no command) Takeover sets itself up in the background: the screen packages,
-the agent's visible browser, and the hermes-webui Screen page and its service. **Reload WebUI once** (WebUI loads
-extensions when a page loads) and the **Screen** button is in the side rail. The first time you open it, WebUI asks you
-once to allow Takeover's service: tap **Allow Takeover**, then **Approve** on the highlighted row. Remove with
+That's it. Right after install (no new chat, no command) Takeover adds the hermes-webui Screen page and its service in
+the background. **Reload WebUI once** (WebUI loads extensions when a page loads) and the **Screen** button is in the side
+rail. The first time you open it, WebUI asks you once to allow Takeover's service: tap **Allow Takeover**, then
+**Approve** on the highlighted row. Opening Screen then sets up the screen itself, once (the packages and the agent's
+visible browser; a minute or two, with progress on the page). Remove with
 `hermes plugins remove takeover`; within a few seconds its service removes the Screen page from WebUI and exits.
 
 | Surface | How it appears |
@@ -30,7 +31,7 @@ once to allow Takeover's service: tap **Allow Takeover**, then **Approve** on th
 | **Hermes Desktop** | An in-app alert with the reason, a native notification when Hermes is in the background, an **Agent needs you** chip in the status bar until it is answered, and a **Takeover** palette command. You take over in Desktop's own **Screen** pane (Agents, then the agent, then Screen, then **Take over**); it shares the lease this plugin waits on, so **Hand back** there lets the agent continue. See [Hermes Desktop](#hermes-desktop-and-other-hermes-products). |
 | **Terminal, messaging apps** (`hermes`, Telegram, Discord, Slack, ...) | Nothing to look at there, so on a messaging platform the agent is told to message you first (what it needs, where to go), then waits. Open WebUI, the dashboard or Desktop to take over. |
 
-### What "first run" does (automatically, once)
+### What "first run" does (once)
 
 | Need | How it is handled |
 |---|---|
@@ -41,9 +42,15 @@ once to allow Takeover's service: tap **Allow Takeover**, then **Approve** on th
 | WebUI's approval | **Your decision, one tap.** WebUI asks before an extension may use its own service (Settings → Extensions → Diagnostics); this one relays your clicks and keys into the agent's screen, so Takeover never grants it on its own by default. The Screen page shows **Allow Takeover**, which takes you to WebUI's exact Approve button, highlighted, and comes back by itself. WebUI only allows this when it has a password set. Opt in to `webui_auto_approve: true` if you want the page to grant it once by itself (a later revoke in WebUI still sticks). |
 | Python packages | **None.** Everything is stdlib or already in Hermes; noVNC 1.6.0 is bundled (no CDN). |
 
-When: the moment Hermes loads the plugin after install (a detached helper, so even a short `hermes ...` command starts it;
-never from `plugins doctor` / `validate`), plus first Screen visit and first `request_takeover` as fallbacks, or by hand
-with `hermes takeover setup` / `hermes takeover webui`. Package setup is attempted once automatically; afterwards only on request. Switches (`hermes config set plugins.entries.takeover.settings.<key> false`):
+When, split by what it touches:
+- **When Hermes loads the plugin** (a detached helper, so even a short `hermes ...` command starts it; never from
+  `plugins doctor` / `validate`): only the hermes-webui Screen page and its service. Unprivileged and reversible.
+- **On the first deliberate use**: the screen packages (root, through Hermes's installer) and `browser.headed`. That is
+  opening the Screen page (WebUI or the dashboard), the agent's first `request_takeover` (setup starts in its own process
+  and the tool returns `setting_up` at once, so the agent tells you and asks again), or `hermes takeover setup`. Nothing
+  privileged ever starts because a cron job or the messaging gateway loaded the plugin.
+
+Package setup is attempted once automatically; afterwards only on request. Switches (`hermes config set plugins.entries.takeover.settings.<key> false`):
 `auto_install` (packages + headed browser), `webui_integration` (never touch hermes-webui), `webui_auto_approve`, `fence_browser_tools`
 (pause browser tools while you hold control) and `takeover_hints` (the nudge below). Linux only (Bot Desktop is
 Linux-only); the tool hides itself elsewhere.
@@ -69,6 +76,7 @@ one card (both reasons shown):
 |---|---|
 | `completed` | You did the step and handed back. The agent takes a fresh screenshot and continues. |
 | `still_waiting` | The call ran out of its own time; the agent calls again to keep waiting. |
+| `setting_up` | First use on this machine: the one-time screen setup just started; the agent tells you and asks again in a minute or two. |
 | `timeout` / `still_with_human` / `dismissed` / `cancelled` | The agent tells you what it is waiting for and stops. |
 
 While you hold control every screen/browser tool is refused, even screenshots, because you may be typing a credential.
@@ -182,7 +190,7 @@ desktop/        plugin.js (Hermes Desktop half: alert, notification, status-bar 
 webui/          manifest.json · assets/takeover.js + takeover.css + touch.js (phone gestures)   (noVNC is copied in from dashboard/dist at install)
 skills/takeover/SKILL.md
 tests/          test_core.py (65) · test_sidecar.py (43) · desktop/ (10, node, mocked SDK) · test_hermes_integration.py (6: through Hermes's own plugin loader,
-                hook dispatch, prompt rendering, `plugins doctor --ci`, `plugins validate`, first run right after install)
+                hook dispatch, prompt rendering, `plugins doctor --ci`, `plugins validate`, first run right after install: WebUI only, nothing privileged)
                 e2e/run_e2e.py (dashboard, 25) via e2e/fresh_dashboard_e2e.sh · e2e/run_webui_e2e.py (WebUI, 60) via e2e/fresh_webui_e2e.sh (scratch homes)
 ```
 

@@ -231,8 +231,14 @@ def maybe_auto_setup(home) -> Dict[str, Any]:
     return s
 
 
-def ensure_ready(home, timeout: float = 600.0) -> Dict[str, Any]:
-    """For the agent tool: return a ready ``readiness`` or raise ``RuntimeError`` with what the user must do."""
+class SetupRunning(RuntimeError):
+    """First-run setup is in progress (packages can take minutes): the caller should come back, not fail."""
+
+
+def ensure_ready(home, timeout: float = 600.0, detached: bool = False) -> Dict[str, Any]:
+    """Return a ready ``readiness``; or raise ``SetupRunning`` (still installing after ``timeout``) or ``RuntimeError``
+    with what the user must do. ``detached``: run setup in its own process (the agent tool: its process may be a
+    short-lived ``hermes chat``), else in a thread of this one (the CLI waits for it anyway)."""
     r = readiness(home)
     if r["ready"]:
         return r
@@ -240,7 +246,12 @@ def ensure_ready(home, timeout: float = 600.0) -> Dict[str, Any]:
         raise RuntimeError("Takeover needs a Linux host with Bot Desktop; this host is not supported.")
     if not compat.setting("auto_install", True, home=home) and setup_state(home)["state"] != "running":
         raise RuntimeError("Takeover is not set up and auto_install is off. Run: hermes takeover setup")
-    start_async(home)
+    if setup_state(home)["state"] != "running":
+        if detached:
+            from . import bootstrap
+            bootstrap.spawn_setup(home)
+        else:
+            start_async(home)
     end = time.time() + timeout
     while time.time() < end:
         time.sleep(1)
@@ -251,4 +262,6 @@ def ensure_ready(home, timeout: float = 600.0) -> Dict[str, Any]:
     if r["ready"]:
         return r
     s = setup_state(home)
-    raise RuntimeError(s.get("error") or "Takeover setup is still running; try again in a minute.")
+    if s["state"] in ("running", "idle") and not s.get("error"):
+        raise SetupRunning("The one-time screen setup is still running (installing packages can take a few minutes).")
+    raise RuntimeError(s.get("error") or "Takeover setup did not finish; run: hermes takeover setup")

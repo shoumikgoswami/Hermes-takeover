@@ -14,8 +14,9 @@ When a step needs you (sign in, approve or authorize, a 2FA code, a CAPTCHA, a p
 - **Telegram, Discord, Slack...**: the agent messages you where to go, then waits; take over from WebUI, the dashboard or Desktop.
 - **Terminal**: `hermes takeover status`
 
-**Already happening in the background:** installing the screen packages (TigerVNC + Xfce, through Hermes's own Bot Desktop
-installer), turning on `browser.headed`, and adding the Screen page and its service to hermes-webui. If this server needs
-a password for root, `hermes takeover status` and the Screen page show the one command to run.
+**Already happening in the background:** adding the Screen page and its service to hermes-webui (nothing privileged).
+**On first use** (opening Screen, the agent's first request, or `hermes takeover setup`): installing the screen packages
+(TigerVNC + Xfce, through Hermes's own Bot Desktop installer) and turning on `browser.headed`, once. If this server needs
+a password for root, the Screen page and `hermes takeover status` show the one command to run.
 
 New chats know when to ask for you. Feedback: hello@shoumikgoswami.com

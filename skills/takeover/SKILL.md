@@ -27,6 +27,8 @@ strong signal, but you decide (ignore it if the page does not actually need the 
    On a messaging platform (Telegram, Discord, Slack, ...) the first call returns `requested_tell_user` at once: **message the user
    in that chat now** (what to do, and that they open WebUI, the dashboard or Desktop and tap Take over), then call
    `request_takeover` again with the same reason to wait.
+   Result `setting_up` (first use on this machine): tell the user the screen is being set up for the first time, wait a minute,
+   then call `request_takeover` again with the same reason.
 3. Result `completed`: take a **fresh screenshot/snapshot first**, the page has changed, then continue.
 4. Result `timeout` / `still_with_human` / `dismissed` (or `still_waiting` after you have re-called a few times): tell the user plainly what you are waiting for and **stop the turn**.
    Do not retry in a loop.

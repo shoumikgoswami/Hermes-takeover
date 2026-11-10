@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import importlib
 
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 PLUGIN_ID = "takeover"
 
 _SUBMODULES = ("compat", "state", "setup", "tickets", "control", "bridge", "sidecar", "webui", "tool", "cli", "fence", "nudge", "bootstrap", "surfaces")

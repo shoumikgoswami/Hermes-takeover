@@ -1,5 +1,5 @@
 name: takeover
-version: 0.5.1
+version: 0.5.2
 manifest_version: 2
 description: "When a step needs you (sign-in, approve or authorize, 2FA code, CAPTCHA, payment), the agent asks and you tap Take over in hermes-webui, the Hermes dashboard or Hermes Desktop (alert + Screen pane), even on your phone. Do it in the agent's browser, hand back, and it carries on."
 author: Shoumik Goswami
@@ -13,16 +13,17 @@ provides_hooks:
   - pre_tool_call
   - transform_tool_result
 # No extra Python packages: FastAPI/websockets ship with the dashboard and noVNC is bundled.
-# System packages (TigerVNC + Xfce) are installed on first run through Hermes's own Bot Desktop installer.
+# System packages (TigerVNC + Xfce) are installed on first USE (Screen page, first request_takeover, `hermes takeover
+# setup`), never on plugin load, through Hermes's own Bot Desktop installer.
 config_schema:
   auto_install:
     type: bool
     default: true
-    description: "On first use, install the screen packages (needs root access without a password prompt) and enable browser.headed automatically."
+    description: "On first use (opening the Screen page, the agent's first request_takeover, or `hermes takeover setup`; never when the plugin merely loads), install the screen packages (needs root access without a password prompt) and enable browser.headed."
   webui_integration:
     type: bool
     default: true
-    description: "If hermes-webui is on this host, install its Screen page and run the Takeover service for it (first agent session). Set false to never touch hermes-webui."
+    description: "If hermes-webui is on this host, install its Screen page and run the Takeover service for it (when the plugin loads; unprivileged). Set false to never touch hermes-webui."
   fence_browser_tools:
     type: bool
     default: true

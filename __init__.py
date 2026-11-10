@@ -74,7 +74,7 @@ def _transform_tool_result(**kwargs):
 
 def register(ctx) -> None:
     core = _load_core()
-    core.bootstrap.kick()         # first run right after install: WebUI Screen page + service, screen packages (once)
+    core.bootstrap.kick()         # right after install: the WebUI Screen page + service only (nothing privileged at load)
     ctx.register_hook("on_session_start", _on_session_start)
     ctx.register_hook("pre_tool_call", _pre_tool_call)
     ctx.register_tool(name=core.tool.NAME, toolset="takeover", schema=core.tool.SCHEMA, handler=core.tool.handle,

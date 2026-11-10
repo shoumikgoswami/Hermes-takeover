@@ -3,7 +3,7 @@
   "label": "Screen",
   "description": "Live view of the agent's browser with one-tap Take over and Hand back.",
   "icon": "Eye",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "tab": {
     "path": "/takeover",
     "position": "after:sessions"

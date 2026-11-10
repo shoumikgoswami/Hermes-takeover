@@ -19,7 +19,8 @@ SCHEMA = {
         "hermes-webui, the Hermes dashboard or Hermes Desktop (also on their phone), taps the one-tap Take over button, does the step in the SAME browser you are using, then hands "
         "control back. This call WAITS until they have handed back, so you do not need to ask them to say 'done'. "
         "Hermes limits one tool call to a few minutes: if the result is 'still_waiting', call it again with the same "
-        "reason to keep waiting (the request stays posted). While they hold control, all your screen/browser tools are refused. Never ask the user "
+        "reason to keep waiting (the request stays posted); 'setting_up' means the one-time screen setup just started, "
+        "tell the user and call again in a minute or two. While they hold control, all your screen/browser tools are refused. Never ask the user "
         "to type secrets into chat; use this instead. After it returns 'completed', take a fresh screenshot/snapshot "
         "before acting: the page has changed."),
     "parameters": {
@@ -113,8 +114,11 @@ def _handle(args: Dict[str, Any]) -> str:
     budget = call_budget()
     started = time.monotonic()
 
-    try:                                   # never block the whole call on first-run setup
-        ready = setup.ensure_ready(home, timeout=min(120.0, (budget or 600.0) / 3))
+    try:                                   # first use: one-time setup in its own process; never block the whole call
+        ready = setup.ensure_ready(home, timeout=min(120.0, (budget or 600.0) / 3), detached=True)
+    except setup.SetupRunning as exc:
+        return _out("setting_up", f"{exc} Tell the user the screen is being set up for the first time, then call "
+                    "request_takeover again with the same reason in a minute or two.")
     except RuntimeError as exc:
         return _out("error", f"The screen is not available: {exc}")
     try:                                   # keep the hermes-webui half current (no-op when WebUI is not on this host)

@@ -363,7 +363,7 @@ class TestTool(Base):
     def setUp(self):
         super().setUp()
         self._ready = core.setup.ensure_ready
-        core.setup.ensure_ready = lambda home, timeout=0: {"ready": True, "headed": True}
+        core.setup.ensure_ready = lambda home, timeout=0, **kw: {"ready": True, "headed": True}
         self._start = core.control.start_screen
         core.control.start_screen = lambda home: {"running": True}
         self._bc = core.surfaces.broadcast
@@ -593,12 +593,26 @@ class TestTool(Base):
             interrupt.set_interrupt(False, tid)
 
     def test_not_ready_is_an_error_not_a_crash(self):
-        def boom(home, timeout=0):
+        def boom(home, timeout=0, **kw):
             raise RuntimeError("needs a password prompt")
         core.setup.ensure_ready = boom
         out = self.call(reason="x")
         self.assertEqual(out["status"], "error")
         self.assertIn("password", out["message"])
+
+    def test_first_use_starts_setup_detached_and_comes_back_instead_of_blocking(self):
+        seen = {}
+
+        def installing(home, timeout=0, **kw):
+            seen.update(kw, timeout=timeout)
+            raise core.setup.SetupRunning("The one-time screen setup is still running.")
+        core.setup.ensure_ready = installing
+        out = self.call(reason="Sign in", wait_seconds=600)
+        self.assertEqual(out["status"], "setting_up", out)
+        self.assertIn("again", out["message"])
+        self.assertIs(seen.get("detached"), True)                       # survives a short-lived agent process
+        self.assertLessEqual(seen["timeout"], 120)                      # well inside Hermes' tool deadline
+        self.assertIsNone(core.state.request_view(HOME))                # nothing posted for a screen that is not there yet
 
     def test_schema_and_registration(self):
         class Ctx:
@@ -761,7 +775,7 @@ class TestBootstrap(Base):
         self.assertFalse(core.bootstrap.installed_copy(HOME))         # tests load the repo, not <home>/plugins/takeover
         spawned = []
         saved = core.bootstrap.spawn
-        core.bootstrap.spawn = lambda home: spawned.append(home)
+        core.bootstrap.spawn = lambda home, mode="webui": spawned.append(home)
         try:
             core.bootstrap.kick(HOME); time.sleep(0.5)
         finally:
@@ -779,13 +793,39 @@ class TestBootstrap(Base):
         calls = []
         saved_needs, saved_spawn = core.bootstrap.needs, core.bootstrap.spawn
         core.bootstrap.needs = lambda home: {"setup": False, "webui": True}
-        core.bootstrap.spawn = lambda home: calls.append(home)
+        core.bootstrap.spawn = lambda home, mode="webui": calls.append((home, mode))
         try:
             self.assertTrue(core.bootstrap.kick(HOME))
             self.assertFalse(core.bootstrap.kick(HOME))
         finally:
             core.bootstrap.installed_copy, core.bootstrap.needs, core.bootstrap.spawn = saved, saved_needs, saved_spawn
-        self.assertEqual(calls, [HOME])
+        self.assertEqual(calls, [(HOME, "webui")])
+
+    def test_a_plugin_load_never_starts_the_privileged_setup(self):
+        # whatever setup state is (never attempted, packages missing, headless browser), load only ever asks for webui
+        saved = core.setup.readiness, core.setup.setup_state
+        core.setup.readiness = lambda home: {"supported": True, "ready": False, "headed": False}
+        core.setup.setup_state = lambda home: {"auto_allowed": True, "attempted": False, "state": "idle"}
+        try:
+            self.assertFalse(core.bootstrap.needs(HOME)["setup"])
+            import inspect
+            body = inspect.getsource(core.bootstrap.kick)
+            self.assertNotIn("run_setup", body); self.assertNotIn('"setup"', body)
+        finally:
+            core.setup.readiness, core.setup.setup_state = saved
+
+    def test_the_helper_only_runs_setup_when_asked_for_by_a_deliberate_use(self):
+        ran = []
+        saved = core.setup.run_setup, core.webui.state_dir
+        core.setup.run_setup = lambda home: ran.append(home) or {"state": "done"}
+        core.webui.state_dir = lambda: None
+        try:
+            core.bootstrap.run(HOME)                                   # what a plugin load starts
+            self.assertEqual(ran, [])
+            core.bootstrap.run(HOME, "setup")                          # what request_takeover / Screen starts
+            self.assertEqual(ran, [HOME])
+        finally:
+            core.setup.run_setup, core.webui.state_dir = saved
 
     def test_only_upgrades_never_downgrades(self):
         older, vt = core.webui.older, core.webui.vt

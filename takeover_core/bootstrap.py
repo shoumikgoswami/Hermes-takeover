@@ -1,12 +1,14 @@
-"""First run, right after ``hermes plugins install``: no new chat, no manual command.
+"""First run, right after ``hermes plugins install``: the hermes-webui Screen page appears by itself.
 
-Hermes calls ``register(ctx)`` in every process that loads the plugin (the running WebUI / gateway picks a fresh install
-up immediately). ``kick`` does a cheap check there and, only when something is missing, starts ONE detached helper
-process (``bootstrap_run.py``) that:
+Hermes calls ``register(ctx)`` in every process that loads the plugin (including cron and the messaging gateway).
+``kick`` does a cheap check there and, only when something is missing, starts ONE detached helper process
+(``bootstrap_run.py``) that installs / upgrades the WebUI Screen page and starts the Takeover service, when hermes-webui
+is on this host. That is unprivileged and reversible (a copy into WebUI's extensions folder plus a loopback process).
 
-1. runs first-run setup once (screen packages through Hermes's Bot Desktop installer, ``browser.headed``), when
-   ``auto_install`` allows it and it was never attempted;
-2. installs / upgrades the WebUI Screen page and starts the Takeover service, when hermes-webui is on this host.
+Nothing privileged ever starts from a plugin load. The screen packages (root, through Hermes's Bot Desktop installer)
+and ``browser.headed`` are set up on the first deliberate use instead: opening the Screen page (WebUI or dashboard), the
+agent's first ``request_takeover`` (``spawn_setup``, detached, so the tool call returns at once), or
+``hermes takeover setup``.
 
 Detached because the process that loaded the plugin may be a two-second ``hermes ...`` command. Guarded so it never
 runs from ``hermes plugins doctor`` / ``validate`` (they import the plugin from its source tree with a temporary home),
@@ -40,15 +42,9 @@ def installed_copy(home) -> bool:
 
 
 def needs(home) -> Dict[str, bool]:
-    """What is missing. Cheap: a couple of file reads and (only before the first setup) a package probe."""
+    """What a plugin load may fix: only the unprivileged WebUI half. (``setup`` is always False here: see the module
+    docstring; it stays in the result for older callers.)"""
     out = {"setup": False, "webui": False}
-    try:
-        s = setup.setup_state(home)
-        if s["auto_allowed"] and not s["attempted"] and s["state"] != "running":
-            r = setup.readiness(home)
-            out["setup"] = bool(r["supported"] and (not r["ready"] or r["headed"] is False))
-    except Exception:  # noqa: BLE001 - incompatible Hermes / not Linux: nothing to set up
-        pass
     try:
         sd = webui.state_dir()
         if sd is not None and webui.enabled():
@@ -60,13 +56,21 @@ def needs(home) -> Dict[str, bool]:
     return out
 
 
-def spawn(home) -> Optional[int]:
-    from . import webui
+def spawn(home, mode: str = "webui") -> Optional[int]:
+    """Start the detached helper. ``mode``: ``webui`` (plugin load) or ``setup`` (a deliberate first use)."""
     env = webui.child_env(home)                    # no credentials in a detached helper; PYTHONPATH reaches Hermes
     with open(state.data_dir(home) / "bootstrap.log", "ab") as log:
-        p = subprocess.Popen([sys.executable, "-u", str(PLUGIN_ROOT / "bootstrap_run.py")], env=env, stdin=subprocess.DEVNULL,
-                             stdout=log, stderr=log, start_new_session=True, close_fds=True)
+        p = subprocess.Popen([sys.executable, "-u", str(PLUGIN_ROOT / "bootstrap_run.py"), mode], env=env,
+                             stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True, close_fds=True)
     return p.pid
+
+
+def spawn_setup(home) -> bool:
+    """First-run setup in a detached process (survives a short-lived agent process). False when it is already running."""
+    if setup.setup_state(home)["state"] == "running":
+        return False
+    spawn(home, "setup")
+    return True
 
 
 def kick(home=None) -> bool:
@@ -86,17 +90,21 @@ def kick(home=None) -> bool:
         # Inline, not in a thread: the loading process may be a short `hermes ...` command that exits before a thread
         # would get to spawn. The check is a few file reads and one loopback request (milliseconds); the slow part runs
         # in the detached helper.
-        n = needs(home)
-        if n["setup"] or n["webui"]:
-            spawn(home)
+        if needs(home)["webui"]:
+            spawn(home, "webui")
             return True
         return False
     except Exception:  # noqa: BLE001
         return False
 
 
-def run(home) -> Dict[str, Any]:
-    """The helper process body. One at a time per home (file lock)."""
+def run(home, mode: str = "webui") -> Dict[str, Any]:
+    """The helper process body. ``webui``: the Screen page + service only. ``setup``: first-run setup (started by a
+    deliberate use, never by a plugin load), which also wires hermes-webui at its end."""
+    if mode == "setup":
+        out: Dict[str, Any] = {"mode": "setup", "at": time.time(), "setup": setup.run_setup(home).get("state")}
+        print(out, flush=True)
+        return out
     fh = open(state.data_dir(home) / "bootstrap.lock", "a+")
     try:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -104,9 +112,7 @@ def run(home) -> Dict[str, Any]:
         return {"skipped": "another bootstrap is running"}
     try:
         n = needs(home)
-        out: Dict[str, Any] = {"needs": n, "at": time.time()}
-        if n["setup"]:
-            out["setup"] = setup.run_setup(home).get("state")       # also wires hermes-webui at its end
+        out = {"needs": n, "at": time.time()}
         if webui.state_dir() is not None and webui.enabled():
             out["webui"] = webui.integrate(home)
         print(out, flush=True)
