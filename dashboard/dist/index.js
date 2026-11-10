@@ -403,7 +403,7 @@
     }
 
     const ask = req && req.status === "pending"
-      ? h("div", { className: "hdo-ask" }, h("b", null, "The agent needs you: "), req.reason, " ",
+      ? h("div", { className: "hdo-ask" }, h("b", null, "The agent needs you: "), req.reason, /[.!?]$/.test(String(req.reason).trim()) ? " " : ". ",
           h("span", { className: "hdo-ask-how" }, s.mine ? "Do it, then click Hand back. " : "Click Take over, do it, then Hand back. "),
           h("button", { className: "hdo-link", onClick: () => ctl.dismiss() }, "Dismiss"))
       : null;

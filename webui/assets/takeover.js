@@ -261,11 +261,11 @@ function __hermesTakeoverWebuiPost(path, body) {
     '<div class="hdo-side-reason" data-s="reason" hidden></div>' +
     '<div class="hdo-side-btns"><button type="button" class="hdo-global-take" data-s="take" hidden>Take over</button>' +
     '<button type="button" class="hdo-side-open" data-s="open">Open Screen</button></div></div>' +
-    '<div class="hdo-side-h">First time (once)</div>' +
+    '<div data-s="first"><div class="hdo-side-h">First time (once)</div>' +
     '<ol class="hdo-side-steps">' +
     '<li><b>Open Screen.</b></li>' +
     '<li><b>Tap Allow Takeover,</b> then Approve proxy consent on the highlighted row. WebUI asks once (it needs a password set).</li>' +
-    '<li><b>Wait a minute.</b> The screen sets itself up; the page shows progress.</li></ol>' +
+    '<li><b>Wait a minute.</b> The screen sets itself up; the page shows progress.</li></ol></div>' +
     '<div class="hdo-side-h">How it works</div>' +
     '<ol class="hdo-side-steps">' +
     '<li><b>The agent asks.</b> For example "Sign in to GitHub and approve the Hermes app". A banner shows on every page.</li>' +
@@ -285,6 +285,8 @@ function __hermesTakeoverWebuiPost(path, body) {
   function renderSide(p) {
     if (!side || !p) return;
     const q = (k) => side.querySelector('[data-s=' + k + ']');
+    const first = q('first');                         // the one-time steps: only until WebUI allowed it and the screen is set up
+    if (first) first.hidden = !!p.ok;                // allowed in WebUI; the Screen page itself guides the rest
     const own = p.request && p.request.status === 'pending' ? p.request : null;
     const other = !own && Array.isArray(p.elsewhere) && p.elsewhere.length ? p.elsewhere[0] : null;
     const req = own || (other ? { status: 'pending', reason: other.reason, profile: other.profile } : null);
@@ -505,7 +507,7 @@ function __hermesTakeoverWebuiPost(path, body) {
       F.ask.dataset.k = askKey;
       F.ask.textContent = '';
       const b = document.createElement('b'); b.textContent = 'The agent needs you: ';
-      F.ask.appendChild(b); F.ask.appendChild(document.createTextNode(req.reason + ' '));
+      F.ask.appendChild(b); F.ask.appendChild(document.createTextNode(req.reason + (/[.!?]$/.test(req.reason.trim()) ? ' ' : '. ')));
       const how = document.createElement('span'); how.className = 'hdo-ask-how';
       how.textContent = S.mine ? 'Do it, then tap Hand back. ' : 'Tap Take over, do it, then Hand back. ';
       F.ask.appendChild(how);
