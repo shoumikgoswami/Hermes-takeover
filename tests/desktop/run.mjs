@@ -101,7 +101,7 @@ await ok('degrades when optional SDK doors are missing (no pet, no native notifi
   t.disposers.forEach(fn => fn())
 })
 
-await ok('the toast action and the palette command open the help tab, falling back to the Agents page', async () => {
+await ok('the toast action and the palette command open the help tab', async () => {
   reset(); const t = makeCtx({ pulse: { ok: true } }); plugin.register(t.ctx); await tick()
   t.emit('plugin.takeover.request', { id: 'w', reason: 'Approve' })
   calls.notify[0].action.onClick()

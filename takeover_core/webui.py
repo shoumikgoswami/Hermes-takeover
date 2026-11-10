@@ -249,10 +249,26 @@ def ensure_sidecar(home, restart: bool = False) -> Dict[str, Any]:
 
 
 # ── the whole thing ───────────────────────────────────────────────────────────
+def consent_given(sd: Optional[Path]) -> Optional[bool]:
+    """Has the user allowed Takeover's service in WebUI (Settings -> Extensions -> Diagnostics)? Read-only; None when
+    unknown (WebUI keeps it in extension-overrides.json; an unreadable or absent file means not yet)."""
+    if not sd:
+        return None
+    try:
+        data = json.loads((Path(sd) / "extension-overrides.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError):
+        return None
+    c = data.get("sidecar_proxy_consents") if isinstance(data, dict) else None
+    return bool(isinstance(c, dict) and c.get(PLUGIN_ID))
+
+
 def status(home) -> Dict[str, Any]:
     sd = state_dir()
     h = health(0.5)
     return {"detected": bool(sd), "state_dir": str(sd) if sd else None, "extension": installed_version(sd),
+            "consent": consent_given(sd),
             "sidecar": bool(h), "sidecar_version": (h or {}).get("version"), "enabled": enabled(),
             "serves_this_profile": bool(h) and (bool(h.get("multi_profile")) or not h.get("home_id")
                                                 or h["home_id"] == home_id(home))}

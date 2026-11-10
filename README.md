@@ -24,6 +24,11 @@ rail. The first time you open it, WebUI asks you once to allow Takeover's servic
 visible browser; a minute or two, with progress on the page). Remove with
 `hermes plugins remove takeover`; within a few seconds its service removes the Screen page from WebUI and exits.
 
+**First time in hermes-webui:** reload WebUI → open **Screen** → tap **Allow Takeover** → **Approve proxy consent** on the
+highlighted row → wait a minute while the screen sets itself up (progress on the page). Every state of the Screen page
+says what to do next and shows the button for it (**Allow Takeover**, **Set up the screen**, **Start screen**, **Copy
+command**, **Take over**, **Hand back**). In a terminal, `hermes takeover status` ends with a `next:` line.
+
 | Surface | How it appears |
 |---|---|
 | **hermes-webui** | A **Screen** button in the side rail (phone: bottom nav); while the agent is asking, a banner on every page with **Take over** (one tap) and **Just watch**; a **Takeover** card in **Settings → Plugins** with live status and **Open Screen**. `<webui>/#takeover` opens it too. |
@@ -189,9 +194,9 @@ dashboard/      manifest.json · plugin_api.py (routes + WebSocket) · dist/ (in
 desktop/        plugin.js (Hermes Desktop half: alert, notification, status-bar chip; no JSX, SDK-only imports)
 webui/          manifest.json · assets/takeover.js + takeover.css + touch.js (phone gestures)   (noVNC is copied in from dashboard/dist at install)
 skills/takeover/SKILL.md
-tests/          test_core.py (65) · test_sidecar.py (43) · desktop/ (10, node, mocked SDK) · test_hermes_integration.py (6: through Hermes's own plugin loader,
+tests/          test_core.py (71) · test_sidecar.py (45) · desktop/ (10, node, mocked SDK) · ui/guidance.mjs (36: every Screen state has an instruction or a button) · test_hermes_integration.py (6: through Hermes's own plugin loader,
                 hook dispatch, prompt rendering, `plugins doctor --ci`, `plugins validate`, first run right after install: WebUI only, nothing privileged)
-                e2e/run_e2e.py (dashboard, 25) via e2e/fresh_dashboard_e2e.sh · e2e/run_webui_e2e.py (WebUI, 60) via e2e/fresh_webui_e2e.sh (scratch homes)
+                e2e/run_e2e.py (dashboard, 25) via e2e/fresh_dashboard_e2e.sh · e2e/run_webui_e2e.py (WebUI, 63) via e2e/fresh_webui_e2e.sh (scratch homes)
 ```
 
 ## Tests

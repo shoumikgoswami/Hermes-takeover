@@ -766,6 +766,57 @@ class TestNudge(Base):
         self.assertIsNone(plugin_init._transform_tool_result())
 
 
+class TestNextStep(unittest.TestCase):
+    """`hermes takeover status` ends with the one thing to do now, for every state."""
+    def st(self, **o):
+        base = {"readiness": {"supported": True, "ready": True, "headed": True}, "screen": {"running": True},
+                "lease": {"holder": "agent"}, "request": None, "setup": {"state": "done"},
+                "webui": {"detected": True, "enabled": True, "extension": "0.5.2", "sidecar": True, "consent": True}}
+        for k, v in o.items():
+            base[k] = v
+        return core.cli.next_step(base)
+
+    def test_each_state_names_one_action(self):
+        nr = {"supported": True, "ready": False, "headed": False}
+        cases = [
+            (dict(readiness={"supported": False}), "Linux"),
+            (dict(readiness=nr, setup={"state": "running"}), "wait"),
+            (dict(readiness=nr, setup={"state": "needs_manual", "manual_command": "sudo apt-get install -y x"}), "sudo apt-get install -y x"),
+            (dict(readiness=nr, setup={"state": "idle"}), "hermes takeover setup"),
+            (dict(webui={"detected": True, "enabled": True, "extension": None, "sidecar": False}), "hermes takeover webui"),
+            (dict(webui={"detected": True, "enabled": True, "extension": "0.5.2", "sidecar": True, "consent": False}), "Allow Takeover"),
+            (dict(lease={"holder": "human"}), "Hand back"),
+            (dict(request={"reason": "Sign in", "status": "pending"}), "Take over"),
+            (dict(readiness={"supported": True, "ready": True, "headed": False}), "browser.headed"),
+            ({}, "ready"),
+            (dict(webui={"detected": False}), "ready"),
+        ]
+        for o, want in cases:
+            self.assertIn(want, self.st(**o), o)
+
+    def test_consent_is_read_from_webui_state_without_writing_it(self):
+        sd = Path(TMP) / "webui-consent"
+        sd.mkdir(exist_ok=True)
+        self.assertIs(core.webui.consent_given(sd), False)
+        (sd / "extension-overrides.json").write_text(json.dumps({"sidecar_proxy_consents": {"takeover": "http://127.0.0.1:17901"}}))
+        self.assertIs(core.webui.consent_given(sd), True)
+        (sd / "extension-overrides.json").write_text("{broken")
+        self.assertIsNone(core.webui.consent_given(sd))
+        self.assertIsNone(core.webui.consent_given(None))
+
+
+class TestAgentMessages(unittest.TestCase):
+    """What the agent is told to say must name every place the user can take over, and the buttons to press."""
+    def test_where_names_every_surface_and_the_buttons(self):
+        w = core.tool.WHERE
+        for part in ("hermes-webui", "Hermes dashboard", "Hermes Desktop", "Take over"):
+            self.assertIn(part, w)
+        src = Path(core.tool.__file__).read_text()
+        for status in ("requested", "timeout", "requested_tell_user"):
+            i = src.index('"%s"' % status)
+            self.assertIn("WHERE", src[i:i + 400], status)
+
+
 class TestBootstrap(Base):
     def setUp(self):
         super().setUp()

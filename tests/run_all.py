@@ -12,6 +12,8 @@ import shutil
 if shutil.which("node"):
     print("== desktop/run.mjs (Hermes Desktop half, mocked SDK)", flush=True)
     bad |= subprocess.call(["node", "--import", "./tests/desktop/register.mjs", "tests/desktop/run.mjs"], cwd=str(here.parent))
+    print("== ui/guidance.mjs (every Screen-page state tells the user what to do)", flush=True)
+    bad |= subprocess.call(["node", "tests/ui/guidance.mjs"], cwd=str(here.parent))
 else:
     print("== desktop half skipped: node not found")
 sys.exit(1 if bad else 0)

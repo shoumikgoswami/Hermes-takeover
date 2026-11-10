@@ -45,3 +45,7 @@
 @media (max-width: 640px) { .hdo-stage { min-height: 300px; } }
 
 .hdo-global-take { margin-left: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 700; background: #1f6feb; color: #fff !important; text-decoration: none; }
+
+.hdo-banner .hdo-cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; padding: 1px 5px;
+  border-radius: 4px; background: rgba(127,127,127,.18); user-select: all; word-break: break-all; }
+.hdo-ask .hdo-ask-how { opacity: .8; }

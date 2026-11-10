@@ -312,24 +312,39 @@
   function describe(s) {
     if (s.err) {
       if (s.err.error === "incompatible") return { dot: "err", text: "Hermes changed under Takeover", hint: s.err.message };
-      return { dot: "err", text: "Cannot reach the Takeover backend", hint: s.err.message || "Is the plugin enabled? hermes plugins enable takeover, then restart the dashboard." };
+      return { dot: "err", text: "Cannot reach the Takeover backend", hint: s.err.message || "Is the plugin enabled? Run on the server: hermes plugins enable takeover, then restart hermes dashboard." };
     }
     const st = s.status;
     if (!st) return { dot: "wait", text: "Connecting…" };
     const r = st.readiness, setup = st.setup || {}, scr = st.screen || {}, lease = st.lease || {};
     if (!r.supported) return { dot: "err", text: "Not supported on this host", hint: "Takeover needs a Linux host (Bot Desktop)." };
     if (!r.ready) {
-      if (setup.state === "running") return { dot: "wait", text: "Setting up the screen… (first run)" };
-      if (setup.state === "needs_manual") return { dot: "err", text: "One manual step needed", hint: setup.error, copy: setup.manual_command };
-      if (setup.state === "failed") return { dot: "err", text: "Setup failed", hint: setup.error, retry: true };
-      return { dot: "wait", text: "Preparing…", retry: setup.attempted };
+      if (setup.state === "running") return { dot: "wait", text: "Setting up the screen (one time)…", hint: "Installing the screen packages (TigerVNC + Xfce) through Hermes and making the agent's browser visible. This takes a minute or two; this page continues by itself." };
+      if (setup.state === "needs_manual") return { dot: "err", text: "One manual step needed", hint: (setup.error || "Setup needs root.") + " After running it, click \"Set up the screen\".", copy: setup.manual_command, retry: true };
+      if (setup.state === "failed") return { dot: "err", text: "Setup failed", hint: (setup.error || "") + " Click \"Set up the screen\" to try again, or run on the server: hermes takeover setup", retry: true };
+      if (setup.auto_allowed === false) return { dot: "off", text: "One-time setup needed", hint: "Takeover needs the screen packages (TigerVNC + Xfce, installed as root through Hermes) and the agent's browser set to visible. Automatic setup is off, so click \"Set up the screen\", or run on the server: hermes takeover setup", retry: true };
+      return { dot: "wait", text: setup.attempted ? "Not set up" : "Starting the one-time setup…", retry: !!setup.attempted };
     }
     if (scr.start_error) return { dot: "err", text: "The screen failed to start", hint: scr.start_error, start: true };
     if (scr.starting || s.starting) return { dot: "wait", text: "Starting the screen…" };
     if (!scr.running) return { dot: "off", text: "Screen is off", hint: "The agent starts it when it needs a browser. You can start it now.", start: true };
-    if (lease.holder === "human" && lease.mine) return { dot: "me", text: "You are driving" + (lease.reason ? ": " + lease.reason : "") };
+    if (lease.holder === "human" && lease.mine) return { dot: "me", text: "You are driving" + (lease.reason ? ": " + lease.reason : ""), idle: "Do the step in this browser, then click Hand back. The agent carries on by itself." };
     if (lease.holder === "human") return { dot: "other", text: "Someone else is driving" };
-    return { dot: "agent", text: "Agent is driving" };
+    const fresh = setup.state === "done" && setup.finished && Date.now() / 1000 - setup.finished < 900;
+    return { dot: "agent", text: "Agent is driving",
+      idle: fresh ? "Setup finished. If the screen is empty, the agent's browser was opened before setup; it shows up here the next time the agent opens a browser."
+        : "You are watching. Click Take over to use the screen yourself; the agent waits until you hand back." };
+  }
+
+  async function copyText(text) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (_) {
+      try {
+        const t = document.createElement("textarea"); t.value = text; t.style.position = "fixed"; t.style.opacity = "0";
+        document.body.appendChild(t); t.select(); ok = document.execCommand("copy"); t.remove();
+      } catch (_) { ok = false; }
+    }
+    if (!ok) window.prompt("Copy this command and run it on the server:", text);
   }
 
   function Btn(props) {
@@ -373,19 +388,24 @@
         h("button", { className: "hdo-link", onClick: () => ctl.forceHandBack() }, "Force hand-back"), ".");
     } else if (info.hint) {
       banner = h("div", { className: "hdo-banner " + (info.dot === "err" ? "hdo-err" : "hdo-info") }, info.hint,
-        info.copy ? h("button", { className: "hdo-link", onClick: () => navigator.clipboard && navigator.clipboard.writeText(info.copy) }, " Copy command") : null);
+        info.copy ? [" ", h("code", { key: "c", className: "hdo-cmd" }, info.copy), " ",
+          h("button", { key: "b", className: "hdo-link", onClick: () => copyText(info.copy) }, "Copy command")] : null);
     } else if (lease.holder === "human" && !lease.mine && running) {
       banner = h("div", { className: "hdo-banner hdo-info" }, "Another device has control. Take over to use this one, or ",
         h("button", { className: "hdo-link", onClick: () => ctl.forceHandBack() }, "force hand-back"), ".");
     } else if (s.note) {
       banner = h("div", { className: "hdo-banner hdo-info" }, s.note);
     } else if (running && st.readiness.headed === false) {
-      banner = h("div", { className: "hdo-banner hdo-info" }, "The agent's Chrome may be headless, so there may be nothing to see. Run: hermes config set browser.headed true");
+      banner = h("div", { className: "hdo-banner hdo-info" }, "The agent's browser may be invisible (headless), so there may be nothing to see. Run on the server: ",
+        h("code", { className: "hdo-cmd" }, "hermes config set browser.headed true"));
+    } else if (info.idle && !(req && req.status === "pending")) {
+      banner = h("div", { className: "hdo-banner hdo-info" }, info.idle);
     }
 
     const ask = req && req.status === "pending"
-      ? h("div", { className: "hdo-ask" }, h("b", null, "The agent needs you: "), req.reason,
-          h("button", { className: "hdo-link", onClick: () => ctl.dismiss() }, " Dismiss"))
+      ? h("div", { className: "hdo-ask" }, h("b", null, "The agent needs you: "), req.reason, " ",
+          h("span", { className: "hdo-ask-how" }, s.mine ? "Do it, then click Hand back. " : "Click Take over, do it, then Hand back. "),
+          h("button", { className: "hdo-link", onClick: () => ctl.dismiss() }, "Dismiss"))
       : null;
 
     let empty = "";
@@ -428,7 +448,7 @@
           h("span", { role: "status", "aria-live": "polite", "data-testid": "state" }, info.text)),
         h("div", { className: "hdo-actions" },
           (info.start || info.retry) && ready ? h(Btn, { onClick: () => ctl.startScreen(), "data-testid": "start" }, "Start screen") : null,
-          info.retry && !ready ? h(Btn, { onClick: () => ctl.runSetup(), "data-testid": "setup" }, "Run setup") : null,
+          info.retry && !ready ? h(Btn, { onClick: () => ctl.runSetup(), "data-testid": "setup" }, "Set up the screen") : null,
           running && !s.mine && s.connected ? h(Btn, { className: "hdo-primary", onClick: () => ctl.takeOver(), "data-testid": "take" }, "Take over") : null,
           running && s.mine ? h(Btn, { className: "hdo-primary", onClick: () => ctl.handBack(), "data-testid": "back" }, "Hand back") : null)),
       ask, banner, setupLog,

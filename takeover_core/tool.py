@@ -8,6 +8,9 @@ from typing import Any, Dict, Optional
 from . import compat, control, setup, state, surfaces
 
 NAME = "request_takeover"
+# Where the user takes over, for the agent to repeat to them (one wording everywhere).
+WHERE = ("the Screen page in hermes-webui (side rail; a banner with a Take over button shows on every page) or in the "
+         "Hermes dashboard (Screen tab), or the agent's Screen in Hermes Desktop (the Screen box at the top of the bot's pane)")
 DEFAULT_WAIT, MAX_WAIT = 900, 3600
 
 SCHEMA = {
@@ -120,7 +123,8 @@ def _handle(args: Dict[str, Any]) -> str:
         return _out("setting_up", f"{exc} Tell the user the screen is being set up for the first time, then call "
                     "request_takeover again with the same reason in a minute or two.")
     except RuntimeError as exc:
-        return _out("error", f"The screen is not available: {exc}")
+        return _out("error", f"The screen is not available: {exc} Tell the user exactly this, including any command to run "
+                    "on the server; do not try to do the step yourself.")
     try:                                   # keep the hermes-webui half current (no-op when WebUI is not on this host)
         from . import webui
         if webui.state_dir() is not None and webui.enabled() and not webui.health(0.5):
@@ -131,7 +135,8 @@ def _handle(args: Dict[str, Any]) -> str:
     if not control.screen(home)["running"]:
         try:
             if not control.start_screen(home)["running"]:
-                return _out("error", "The screen could not be started (see `hermes takeover status`).")
+                return _out("error", "The screen could not be started. Tell the user to run `hermes takeover status` on the "
+                            "server and follow its 'next' line.")
         except Exception as exc:  # noqa: BLE001
             return _out("error", f"The screen could not be started: {exc}")
 
@@ -151,14 +156,13 @@ def _handle(args: Dict[str, Any]) -> str:
             state.leave_request(home, req["id"], waiter)
             return _out("requested_tell_user",
                         "This chat is on a messaging app, where the user cannot see the screen. Your request is posted. "
-                        "Tell the user NOW, in this chat: what you need them to do (" + reason + ") and that they must "
-                        "open the Screen page in hermes-webui, the Hermes dashboard or Hermes Desktop (the banner has a "
-                        "Take over button), do it, and tap Hand back. Then call request_takeover again with the same "
-                        "reason to wait for them." + warn)
+                        "Tell the user NOW, in this chat: what you need them to do (" + reason + ") and where: open "
+                        + WHERE + ", tap Take over, do it, then tap Hand back. Then call request_takeover again with "
+                        "the same reason to wait for them." + warn)
     if wait == 0:
         state.leave_request(home, req["id"], waiter)          # posted; nobody waits in this call
-        return _out("requested", "Request posted. Stop and tell the user to tap Take over in the banner (or open Screen), "
-                    "do the step, then Hand back." + warn)
+        return _out("requested", "Request posted. Stop and tell the user: open " + WHERE + ", tap Take over, do the step, "
+                    "then tap Hand back." + warn)
 
     from tools import interrupt
     # wait for the human, but return before Hermes's tool deadline would cut this call off
@@ -216,5 +220,5 @@ def _handle(args: Dict[str, Any]) -> str:
                     "and stop; do not use screen tools until they hand back (they would be refused).")
     if state.leave_request(home, req["id"], waiter, status="expired"):
         surfaces.ended(home, req["id"], "expired")
-    return _out("timeout", f"Nobody took over within {wait}s. Tell the user what you need and that they can open Screen "
-                "in hermes-webui or the Hermes dashboard; then stop." + warn)
+    return _out("timeout", f"Nobody took over within {wait}s. Tell the user what you need and where: {WHERE}; tap Take "
+                "over, do it, tap Hand back, then tell you to continue. Then stop." + warn)

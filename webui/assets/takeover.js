@@ -164,7 +164,7 @@ function __hermesTakeoverWebuiPost(path, body) {
       '<div class="hdo-head"><div class="hdo-state"><span class="hdo-dot" data-f="dot"></span><span data-f="state" role="status" aria-live="polite">Connecting…</span>' +
       '<span class="hdo-prof" data-f="prof" hidden></span></div>' +
       '<div class="hdo-actions"><button type="button" class="hdo-btn" data-f="start" hidden>Start screen</button>' +
-      '<button type="button" class="hdo-btn" data-f="setup" hidden>Run setup</button>' +
+      '<button type="button" class="hdo-btn" data-f="setup" hidden>Set up the screen</button>' +
       '<button type="button" class="hdo-btn hdo-primary" data-f="approve" hidden>Allow Takeover</button>' +
       '<button type="button" class="hdo-btn hdo-primary" data-f="take" hidden>Take over</button>' +
       '<button type="button" class="hdo-btn hdo-primary" data-f="back" hidden>Hand back</button></div></div>' +
@@ -261,6 +261,11 @@ function __hermesTakeoverWebuiPost(path, body) {
     '<div class="hdo-side-reason" data-s="reason" hidden></div>' +
     '<div class="hdo-side-btns"><button type="button" class="hdo-global-take" data-s="take" hidden>Take over</button>' +
     '<button type="button" class="hdo-side-open" data-s="open">Open Screen</button></div></div>' +
+    '<div class="hdo-side-h">First time (once)</div>' +
+    '<ol class="hdo-side-steps">' +
+    '<li><b>Open Screen.</b></li>' +
+    '<li><b>Tap Allow Takeover,</b> then Approve proxy consent on the highlighted row. WebUI asks once (it needs a password set).</li>' +
+    '<li><b>Wait a minute.</b> The screen sets itself up; the page shows progress.</li></ol>' +
     '<div class="hdo-side-h">How it works</div>' +
     '<ol class="hdo-side-steps">' +
     '<li><b>The agent asks.</b> For example "Sign in to GitHub and approve the Hermes app". A banner shows on every page.</li>' +
@@ -274,7 +279,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     '<li>You type passwords straight into the browser, never into chat.</li>' +
     '<li>Left without handing back? Use Force hand-back on the Screen page, or <code>/takeover release</code>.</li></ul>' +
     '<div class="hdo-side-foot">Feedback or ideas? <a href="mailto:' + FEEDBACK + '?subject=Takeover%20plugin%20feedback">' + FEEDBACK + '</a>' +
-    '<div class="hdo-side-ver">Takeover 0.5.2</div></div>' +
+    '<div class="hdo-side-ver">Takeover 0.5.3</div></div>' +
     '</div>';
 
   function renderSide(p) {
@@ -453,25 +458,29 @@ function __hermesTakeoverWebuiPost(path, body) {
       if (e.error === 'not_installed') return { dot: 'off', text: 'Takeover is not installed in the "' + prof() + '" profile', hint: 'Install it there with: hermes -p ' + prof() + ' plugins install shoumikgoswami/Hermes-takeover --enable' };
       if ((e.http === 401 || e.http === 403 || e.http === 503) && AC.error === 'nopassword') return { dot: 'wait', text: 'Set a WebUI password to finish', hint: 'WebUI only lets extensions use a service when it has a password (Settings → Password). Set one and reload; Takeover then connects by itself.' };
       if ((e.http === 401 || e.http === 403 || e.http === 503) && (!AC.tried || AC.busy)) return { dot: 'wait', text: 'Connecting…' };
-      if (e.http === 401 || e.http === 403 || e.http === 503) return { dot: 'wait', text: 'One step: allow Takeover in WebUI', approve: true, hint: 'WebUI asks you once before an extension may use its service. Tap "Allow Takeover", then tap "Approve proxy consent" on the highlighted row; this page continues by itself. (WebUI needs a password set for this: Settings → Password.)' };
-      return { dot: 'err', text: 'Takeover service is not running', hint: 'It starts with your next agent chat. To start it now run: hermes takeover setup', };
+      if (e.http === 401 || e.http === 403 || e.http === 503) return { dot: 'wait', text: 'One step: allow Takeover in WebUI', approve: true, hint: 'WebUI asks you once before an extension may use its service (it passes your clicks and keys to the agent\'s screen). Tap "Allow Takeover", then tap "Approve proxy consent" on the highlighted row; this page continues by itself. (WebUI needs a password set for this: Settings → Password.)' };
+      return { dot: 'err', text: 'Takeover service is not running', hint: 'It starts by itself whenever Hermes runs (a chat or any hermes command). To start it now, run on the server, then reload this page:', copy: 'hermes takeover webui' };
     }
     const st = S.status;
     if (!st) return { dot: 'wait', text: 'Connecting…' };
     const r = st.readiness; const setup = st.setup || {}; const scr = st.screen || {}; const lease = st.lease || {};
     if (!r.supported) return { dot: 'err', text: 'Not supported on this host', hint: 'Takeover needs a Linux host (Bot Desktop).' };
     if (!r.ready) {
-      if (setup.state === 'running') return { dot: 'wait', text: 'Setting up the screen… (first run)' };
-      if (setup.state === 'needs_manual') return { dot: 'err', text: 'One manual step needed', hint: setup.error };
-      if (setup.state === 'failed') return { dot: 'err', text: 'Setup failed', hint: setup.error, retry: true };
-      return { dot: 'wait', text: 'Preparing…', retry: !!setup.attempted };
+      if (setup.state === 'running') return { dot: 'wait', text: 'Setting up the screen (one time)…', hint: 'Installing the screen packages (TigerVNC + Xfce) through Hermes and making the agent\'s browser visible. This takes a minute or two; this page continues by itself.' };
+      if (setup.state === 'needs_manual') return { dot: 'err', text: 'One manual step needed', hint: (setup.error || 'Setup needs root.') + ' After running it, tap "Set up the screen".', copy: setup.manual_command, retry: true };
+      if (setup.state === 'failed') return { dot: 'err', text: 'Setup failed', hint: (setup.error || '') + ' Tap "Set up the screen" to try again, or run on the server: hermes takeover setup', retry: true };
+      if (setup.auto_allowed === false) return { dot: 'off', text: 'One-time setup needed', hint: 'Takeover needs the screen packages (TigerVNC + Xfce, installed as root through Hermes) and the agent\'s browser set to visible. Automatic setup is off, so tap "Set up the screen", or run on the server: hermes takeover setup', retry: true };
+      return { dot: 'wait', text: setup.attempted ? 'Not set up' : 'Starting the one-time setup…', retry: !!setup.attempted };
     }
     if (scr.start_error) return { dot: 'err', text: 'The screen failed to start', hint: scr.start_error, start: true };
     if (scr.starting || S.starting) return { dot: 'wait', text: 'Starting the screen…' };
     if (!scr.running) return { dot: 'off', text: 'Screen is off', hint: 'The agent starts it when it needs a browser. You can start it now.', start: true };
-    if (lease.holder === 'human' && lease.mine) return { dot: 'me', text: 'You are driving' + (lease.reason ? ': ' + lease.reason : '') };
+    if (lease.holder === 'human' && lease.mine) return { dot: 'me', text: 'You are driving' + (lease.reason ? ': ' + lease.reason : ''), idle: 'Do the step in this browser, then tap Hand back. The agent carries on by itself.' };
     if (lease.holder === 'human') return { dot: 'other', text: 'Someone else is driving' };
-    return { dot: 'agent', text: 'Agent is driving' };
+    const fresh = setup.state === 'done' && setup.finished && Date.now() / 1000 - setup.finished < 900;
+    return { dot: 'agent', text: 'Agent is driving',
+      idle: fresh ? 'Setup finished. If the screen is empty, the agent\'s browser was opened before setup; it shows up here the next time the agent opens a browser.'
+        : 'You are watching. Tap Take over to use the screen yourself; the agent waits until you hand back.' };
   }
 
   function render() {
@@ -490,13 +499,16 @@ function __hermesTakeoverWebuiPost(path, body) {
     setHidden(F.tools, !(running && S.mine && S.connected && S.inputOn));
     page.classList.toggle('hdo-driving', !!S.mine);
 
-    const askKey = req && req.status === 'pending' ? req.id + '|' + req.reason : '';
+    const askKey = req && req.status === 'pending' ? req.id + '|' + req.reason + '|' + !!S.mine : '';
     if (askKey && F.ask.dataset.k === askKey) setHidden(F.ask, false);       // unchanged: keep the node (taps, focus)
     else if (askKey) {
       F.ask.dataset.k = askKey;
       F.ask.textContent = '';
       const b = document.createElement('b'); b.textContent = 'The agent needs you: ';
       F.ask.appendChild(b); F.ask.appendChild(document.createTextNode(req.reason + ' '));
+      const how = document.createElement('span'); how.className = 'hdo-ask-how';
+      how.textContent = S.mine ? 'Do it, then tap Hand back. ' : 'Tap Take over, do it, then Hand back. ';
+      F.ask.appendChild(how);
       const d = document.createElement('button'); d.type = 'button'; d.className = 'hdo-link'; d.textContent = 'Dismiss';
       d.addEventListener('click', async () => { await api('/api/dismiss', {}); await refresh(); render(); });
       F.ask.appendChild(d); setHidden(F.ask, false);
@@ -506,19 +518,33 @@ function __hermesTakeoverWebuiPost(path, body) {
     if (S.mine && !S.connected && running) {
       banner = { cls: 'warn', html: 'You still have control, but the live view is down. <button type="button" class="hdo-link" data-act="reconnect">Reconnect</button> or <button type="button" class="hdo-link" data-act="force">Force hand-back</button>.' };
     } else if (info.hint) {
-      banner = { cls: S.err || (st && st.screen && st.screen.start_error) || info.dot === 'err' ? 'err' : 'info', text: info.hint };
+      banner = { cls: S.err || (st && st.screen && st.screen.start_error) || info.dot === 'err' ? 'err' : 'info', text: info.hint, copy: info.copy };
     } else if (lease.holder === 'human' && !lease.mine && running) {
       banner = { cls: 'info', html: 'Another device has control. Take over to use this one, or <button type="button" class="hdo-link" data-act="force">force hand-back</button>.' };
     } else if (S.note) {
       banner = { cls: 'info', text: S.note };
     } else if (running && r.headed === false) {
-      banner = { cls: 'info', text: 'The agent\'s Chrome may be headless, so there may be nothing to see. Run: hermes config set browser.headed true' };
+      banner = { cls: 'info', text: 'The agent\'s browser may be invisible (headless), so there may be nothing to see. Run on the server:', copy: 'hermes config set browser.headed true' };
+    } else if (info.idle && !(req && req.status === 'pending')) {
+      banner = { cls: 'info', text: info.idle };
     }
     if (!banner) setHidden(F.banner, true);
     else {
       F.banner.className = 'hdo-banner hdo-' + banner.cls;
-      const key = banner.html || banner.text;
-      if (F.banner.dataset.k !== key) { if (banner.html) F.banner.innerHTML = banner.html; else F.banner.textContent = banner.text; F.banner.dataset.k = key; }
+      const key = (banner.html || banner.text) + '|' + (banner.copy || '');
+      if (F.banner.dataset.k !== key) {
+        if (banner.html) F.banner.innerHTML = banner.html;        // static strings only (never request/server text)
+        else {
+          F.banner.textContent = banner.text;
+          if (banner.copy) {                                    // the command as text + a one-tap copy (untrusted: textContent only)
+            const code = document.createElement('code'); code.className = 'hdo-cmd'; code.textContent = banner.copy;
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'hdo-link'; b.dataset.act = 'copy';
+            b.dataset.copy = banner.copy; b.textContent = 'Copy command';
+            F.banner.append(' ', code, ' ', b);
+          }
+        }
+        F.banner.dataset.k = key;
+      }
       setHidden(F.banner, false);
     }
     const lines = !ready && setup.lines && setup.lines.length ? setup.lines.slice(-12).join('\n') : '';
@@ -685,6 +711,16 @@ function __hermesTakeoverWebuiPost(path, body) {
     }
     if (enterAfter) press(KS.Enter);
   }
+  async function copyText(text) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch (_) {
+      try {                                                   // plain http (no clipboard API): the old way
+        const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+        document.body.appendChild(t); t.select(); ok = document.execCommand('copy'); t.remove();
+      } catch (_) { ok = false; }
+    }
+    toast(ok ? 'Command copied. Run it on the server.' : 'Copy failed. Select the command and copy it by hand.', ok ? undefined : 'warning');
+  }
   async function pasteFromPhone() {
     if (!S.rfb || !S.inputOn) return;
     let text = '';
@@ -705,6 +741,7 @@ function __hermesTakeoverWebuiPost(path, body) {
       if (!a) return;
       if (a.dataset.act === 'force') forceHandBack();
       if (a.dataset.act === 'reconnect') { disconnect(); S.retry = 0; refresh().then(() => { render(); maybeConnect(); }); }
+      if (a.dataset.act === 'copy') copyText(a.dataset.copy || '');
     });
     $$('[data-z]', page).forEach((b) => b.addEventListener('click', () => {
       const tv = S.tv; if (!tv) return;
@@ -789,7 +826,7 @@ function __hermesTakeoverWebuiPost(path, body) {
         if (G.el) G.el.hidden = true;
         if (side) {
           const st = side.querySelector('[data-s=status]');
-          if (st) st.textContent = 'Not connected yet. Open Screen for setup steps.';
+          if (st) st.textContent = 'Not set up yet. Open Screen: it walks you through the one-time steps.';
         }
       }
     }
@@ -915,7 +952,7 @@ function __hermesTakeoverWebuiPost(path, body) {
   let lastPulse = null;
   function pluginCardHtml() {
     return '<div class="provider-card-header plugin-card-header"><div class="provider-card-info">' +
-      '<div class="provider-card-name">Takeover</div><div class="provider-card-meta">takeover · v0.5.2</div></div>' +
+      '<div class="provider-card-name">Takeover</div><div class="provider-card-meta">takeover · v0.5.3</div></div>' +
       '<span class="provider-card-badge" data-c="badge">Enabled</span></div>' +
       '<div class="provider-card-body plugin-card-body">' +
       '<div class="provider-card-hint">When a step needs you (sign in, approve or authorize, a 2FA code, a CAPTCHA, a payment), the agent asks and you tap Take over. Do it in the agent\'s browser, then hand back.</div>' +
@@ -1006,7 +1043,7 @@ function __hermesTakeoverWebuiPost(path, body) {
     if ($('main.main') && $('.rail, .sidebar-nav') && typeof window.switchPanel === 'function') {
       mount(); wrapCore(); watchPluginsPanel(); autoApprove();
       window.__hermesTakeover = {
-        version: '0.5.2', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
+        version: '0.5.3', open: () => onNavClick(true), takeOver: () => takeOverFromAnywhere(), close: () => window.switchPanel('chat'),
         view: () => (S.tv ? S.tv.state() : null), tv: () => S.tv,
         profile: () => prof(),
         state: () => ({ active: S.active, connected: S.connected, connecting: S.connecting, mine: S.mine, inputOn: S.inputOn,

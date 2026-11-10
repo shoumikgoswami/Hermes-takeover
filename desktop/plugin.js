@@ -4,8 +4,9 @@
 // What it does: the agent asks you to take over its screen (sign-in, approval, 2FA code, CAPTCHA, payment). The
 // plugin's backend runs inside `hermes serve` and emits `plugin.takeover.request` / `plugin.takeover.ended`. Here that
 // becomes an in-app alert, a status-bar chip that stays until the request is over, and a native notification when
-// Hermes is in the background. Taking over itself happens in Desktop's own Screen pane (Agents -> the agent ->
-// Screen -> Take over), which shares the same lease the backend waits on. When you tap Hand back the agent continues.
+// Hermes is in the background. Taking over itself happens in Desktop's own Screen pane (the Screen box at the top of
+// the bot's pane, or right-click the bot -> Open Screen; then Take over), which shares the same lease the backend
+// waits on. When you tap Hand back the agent continues.
 //
 // Plain ESM, no JSX (Desktop loads disk plugins uncompiled). Only @hermes/plugin-sdk, react, react/jsx-runtime.
 import { host, STATUSBAR_AREAS, PALETTE_AREA } from '@hermes/plugin-sdk'
@@ -77,7 +78,7 @@ export default {
           kind: 'warning',
           title: 'The agent needs you',
           message: req.reason,
-          detail: 'Open the agent\u2019s Screen, tap Take over, do the step, then tap Hand back.',
+          detail: 'Open the bot\u2019s Screen (the Screen box at the top of its pane, or right-click the bot \u2192 Open Screen), click Take over, do the step, then click Hand back.',
           action: { label: 'How', onClick: () => openPanel() }
         })
       } catch (_) { /* toast unavailable */ }
@@ -104,9 +105,6 @@ export default {
     poll()
     ctx.setInterval(poll, POLL_MS)
 
-    const openAgents = () => {
-      try { ctx.runAction('nav.agents') } catch (_) { host.navigate('/') }
-    }
     const dismiss = async () => {
       try { await ctx.rest('/dismiss', { method: 'POST', body: {} }) } catch (_) { /* nothing to dismiss */ }
       apply({ type: 'ended', payload: {} })
@@ -126,25 +124,27 @@ export default {
           jsxs('ol', {
             className: 'list-decimal pl-5 text-(--ui-text-tertiary)',
             children: [
-              jsx('li', { children: 'Open the agent\u2019s Screen (Agents, then the agent, then Screen).' }),
-              jsx('li', { children: 'Tap Take over and do the step in its browser.' }),
-              jsx('li', { children: 'Tap Hand back. The agent carries on by itself.' })
+              jsx('li', { children: 'Open the bot\u2019s Screen: click the Screen box at the top of its pane, or right-click the bot in the sidebar \u2192 Open Screen.' }),
+              jsx('li', { children: 'If it says the screen packages are missing, click Install on host (once). If it says Screen is off, click Start.' }),
+              jsx('li', { children: 'Click Take over and do the step in its browser.' }),
+              jsx('li', { children: 'Click Hand back. The agent carries on by itself.' })
             ]
           }),
-          jsxs('div', {
-            className: 'flex gap-2',
-            children: [
-              jsx('button', { type: 'button', className: 'rounded-md border px-3 py-1.5', onClick: openAgents, children: 'Open Agents' }),
-              req ? jsx('button', { type: 'button', className: 'rounded-md border px-3 py-1.5 text-(--ui-text-tertiary)', onClick: dismiss, children: 'Dismiss' }) : null
-            ]
-          }),
+          line('Also on your phone: the Screen page in hermes-webui or the Hermes dashboard does the same.', 'text-xs text-(--ui-text-tertiary)'),
+          req ? jsx('div', { className: 'flex gap-2', children: [
+            jsx('button', { key: 'd', type: 'button', className: 'rounded-md border px-3 py-1.5 text-(--ui-text-tertiary)', onClick: dismiss, children: 'Dismiss this request' })
+          ] }) : null,
           line('Feedback: hello@shoumikgoswami.com', 'mt-auto text-xs text-(--ui-text-tertiary)')
         ]
       })
     }
     function openPanel() {
       if (typeof host.openWorkspace === 'function') host.openWorkspace(ID + ':panel', { title: 'Takeover', render: () => jsx(Panel, {}) })
-      else openAgents()
+      else {
+        try {
+          host.notify({ kind: 'info', title: 'Takeover', message: 'Open the bot\u2019s Screen (right-click the bot \u2192 Open Screen), click Take over, do the step, then Hand back.' })
+        } catch (_) { /* no toast */ }
+      }
     }
 
     function Chip() {

@@ -102,3 +102,8 @@ main.main.showing-x-takeover > #mainTakeover { display: flex; }
 .hdo-prof { margin-left: 8px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid #d29922; color: #d29922; }
 
 .hdo-plugin-status { font-size: 12px; margin: 6px 0 2px; opacity: .85; }
+
+/* commands shown in banners (setup / service hints) */
+.hdo-banner .hdo-cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; padding: 1px 5px;
+  border-radius: 4px; background: rgba(127,127,127,.18); user-select: all; word-break: break-all; }
+.hdo-ask .hdo-ask-how { opacity: .8; }
