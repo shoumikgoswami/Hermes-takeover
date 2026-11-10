@@ -21,7 +21,7 @@ def setup_parser(sub) -> None:
 
 def next_step(st) -> str:
     """The one thing the user should do now, in words (`hermes takeover status`)."""
-    r, sc, ls, rq, w, su = st["readiness"], st["screen"], st["lease"], st["request"], st["webui"], st.get("setup") or {}
+    r, ls, rq, w, su = st["readiness"], st["lease"], st["request"], st["webui"], st.get("setup") or {}
     if not r.get("supported"):
         return "nothing: Takeover needs a Linux host (Bot Desktop)."
     if not r["ready"]:
